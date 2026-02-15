@@ -16,7 +16,7 @@ jobs:
   deploy:
     # Only run if Build and Test workflow was successful
     if: ${{ github.event.workflow_run.conclusion == 'success' }}
-    runs-on: ubuntu-latest
+    runs-on: arc-runner-set
 
     steps:
 #    - name: Get Commit Message from Previous Workflow
