@@ -8,6 +8,96 @@
 - Use eager loading (`selectinload()`) to prevent N+1 query problems
 - Add `order_by` to relationships for predictable ordering
 
+## Connection Pool Configuration
+
+Default pool settings (configurable via environment variables):
+
+| Setting | Production | Test |
+|---------|------------|------|
+| `pool_size` | 8 | 3 |
+| `max_overflow` | 12 | 5 |
+| `pool_timeout` | 30s | 30s |
+| **Max connections** | 20 | 8 |
+
+Environment variables: `DB_POOL_SIZE`, `DB_POOL_MAX_OVERFLOW`
+
+### Pool Timeout with Retry
+
+Use `get_connection_with_retry()` for resilient connection acquisition with exponential backoff:
+
+```python
+from src.core.models.base import get_connection_with_retry
+
+session = await get_connection_with_retry(
+    db.get_session_maker(),
+    max_retries=3,
+    base_delay=0.1,
+)
+```
+
+This handles `PoolTimeout` exceptions gracefully with automatic retries.
+
+## Batch Transactions with Session Parameter
+
+Service methods support optional `session` parameter for atomic batch operations:
+
+```python
+async def create(
+    self,
+    item: SomeSchemaCreate,
+    *,
+    session: AsyncSession | None = None,
+) -> SomeDB:
+    """Create item with optional session for transaction batching.
+
+    Args:
+        item: The item data to create.
+        session: Optional session for transaction batching.
+                 If provided, caller is responsible for commit/rollback.
+    """
+    if session is not None:
+        return await self._create_with_session(item, session)
+    return await super().create(item)
+```
+
+### Batched Operations Example
+
+When creating multiple related entities, use a single session per match for atomicity:
+
+```python
+async def _create_single_parsed_match_batched(
+    self,
+    match_data: dict,
+    match_service,
+    scoreboard_service,
+    match_data_service,
+) -> dict | None:
+    """Create match with all related entities in one transaction."""
+    async with db.get_session_maker()() as session:
+        async with session.begin():
+            match = await match_service.create(
+                match_schema,
+                session=session,
+            )
+
+            scoreboard = await scoreboard_service.create(
+                ScoreboardSchemaCreate(match_id=match.id),
+                session=session,
+            )
+
+            match_data = await match_data_service.create(
+                MatchDataSchemaCreate(match_id=match.id),
+                session=session,
+            )
+
+            return {"match": match, "scoreboard": scoreboard}
+```
+
+Benefits:
+- **Atomicity**: All operations succeed or fail together
+- **Performance**: ~10-15 session acquisitions reduced to 1 per match
+- **Connection pool efficiency**: Fewer connection checkouts
+
 ## File Structure Per Domain
 
 Each domain module must contain:

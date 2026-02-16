@@ -244,6 +244,62 @@ export STATS_THROTTLE_SECONDS=2
 export STATS_THROTTLE_SECONDS=5
 ```
 
+## Database Connection Pool Settings
+
+### Pool Configuration
+
+Connection pool settings are configurable via environment variables:
+
+| Environment Variable | Description | Production Default | Test Default |
+|---------------------|-------------|-------------------|--------------|
+| `DB_POOL_SIZE` | Base pool size | 8 | 3 |
+| `DB_POOL_MAX_OVERFLOW` | Max overflow connections | 12 | 5 |
+| (hardcoded) | `pool_timeout` | 30s | 30s |
+
+**Total max connections**: `pool_size + max_overflow` (20 for production, 8 for test)
+
+### Pool Timeout Handling
+
+The `get_connection_with_retry()` function provides exponential backoff retry on pool exhaustion:
+
+```python
+from src.core.models.base import get_connection_with_retry
+
+session = await get_connection_with_retry(
+    session_maker=db.get_session_maker(),
+    max_retries=3,
+    base_delay=0.1,
+)
+```
+
+**Behavior**:
+- Attempts to acquire a connection up to `max_retries` times
+- Uses exponential backoff: `delay = base_delay * (2 ** attempt)`
+- Logs warnings on each retry attempt
+- Raises `PoolTimeout` if all retries exhausted
+
+**Example retry sequence** (default settings):
+1. Attempt 1: Immediate
+2. Attempt 2: Wait 0.1s
+3. Attempt 3: Wait 0.2s
+4. Raise `PoolTimeout`
+
+### DB Concurrency Semaphore
+
+A semaphore limits concurrent DB operations in fetch helpers:
+
+```python
+# src/helpers/fetch_helpers.py
+_db_semaphore = asyncio.Semaphore(10)
+
+async def fetch_with_scoreboard_data(match_id: int, ...):
+    async with _db_semaphore:
+        # Concurrent DB operations limited to 10
+        ...
+```
+
+This prevents connection pool exhaustion during batch operations.
+
 ## Usage
 
 ### Automatic Validation
