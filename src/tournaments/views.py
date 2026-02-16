@@ -9,6 +9,7 @@ from src.core.dependencies import TournamentService
 from src.core.models import TournamentDB, handle_view_exceptions
 from src.pars_eesl.pars_season import parse_season_and_create_jsons
 from src.pars_eesl.pars_tournament import parse_tournament_and_create_jsons
+from src.tournaments.parser import tournament_parser
 
 from ..helpers.file_service import file_service
 from ..logging_config import get_logger
@@ -503,7 +504,6 @@ class TournamentAPIRouter(
             status_code=500,
         )
         async def create_parsed_tournament_endpoint(
-            tournament_service: TournamentService,
             eesl_season_id: int,
             season_id: int | None = Query(None),
             sport_id: int | None = Query(None),
@@ -511,26 +511,11 @@ class TournamentAPIRouter(
             self.logger.debug(
                 f"Get and Save parsed tournaments from season eesl_id:{eesl_season_id} season_id:{season_id} sport_id:{sport_id} endpoint"
             )
-            tournaments_list = await parse_season_and_create_jsons(
+            parser = tournament_parser(db)
+            created_tournaments = await parser.parse_and_create(
                 eesl_season_id, season_id=season_id, sport_id=sport_id
             )
-
-            created_tournaments = []
-            if tournaments_list:
-                for t in tournaments_list:
-                    tournament = TournamentSchemaCreate(**t)
-                    created_tournament = await tournament_service.create_or_update_tournament(
-                        tournament
-                    )
-                    self.logger.debug(
-                        f"Created or updated tournament after parse {created_tournament}"
-                    )
-                    created_tournaments.append(created_tournament)
-                self.logger.info(f"Created tournaments after parsing: {created_tournaments}")
-                return created_tournaments
-            else:
-                self.logger.warning("Teams list is empty")
-                return []
+            return created_tournaments
 
         @router.get(
             "/pars/tournament/{eesl_tournament_id}",

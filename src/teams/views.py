@@ -3,8 +3,8 @@ from typing import Annotated
 from fastapi import Depends, File, HTTPException, Query, UploadFile
 
 from src.auth.dependencies import require_roles
-from src.core import BaseRouter
-from src.core.dependencies import TeamService, TeamTournamentService, TournamentService
+from src.core import BaseRouter, db
+from src.core.dependencies import TeamService, TeamTournamentService
 from src.core.models import TeamDB, handle_view_exceptions
 
 from ..helpers.file_service import file_service
@@ -14,6 +14,7 @@ from ..pars_eesl.pars_tournament import (
     parse_tournament_teams_index_page_eesl,
 )
 from ..team_tournament.schemas import TeamTournamentSchemaCreate
+from .parser import team_parser
 from .schemas import (
     PaginatedTeamResponse,
     PaginatedTeamWithDetailsResponse,
@@ -255,57 +256,13 @@ class TeamAPIRouter(BaseRouter[TeamSchema, TeamSchemaCreate, TeamSchemaUpdate]):
             error_message="Internal server error parsing and creating teams from tournament",
             status_code=500,
         )
-        async def create_parsed_teams_endpoint(
-            team_service: TeamService,
-            team_tournament_service: TeamTournamentService,
-            tournament_service: TournamentService,
-            eesl_tournament_id: int,
-        ):
+        async def create_parsed_teams_endpoint(eesl_tournament_id: int):
             self.logger.debug(
                 f"Get and Save parsed teams from tournament eesl_id:{eesl_tournament_id} endpoint"
             )
-            tournament = await tournament_service.get_tournament_by_eesl_id(eesl_tournament_id)
-            self.logger.debug(f"Tournament: {tournament}")
-            teams_list = await parse_tournament_teams_index_page_eesl(eesl_tournament_id)
-            self.logger.debug(f"Teams after parse: {teams_list}")
-
-            created_teams = []
-            created_team_tournament_ids = []
-            if teams_list:
-                for t in teams_list:
-                    team = TeamSchemaCreate(**t)
-                    created_team = await team_service.create_or_update_team(team)
-                    self.logger.debug(f"Created or updated team after parse {created_team}")
-                    created_teams.append(created_team)
-                    if created_team and tournament:
-                        dict_conv = TeamTournamentSchemaCreate(
-                            **{
-                                "team_id": created_team.id,
-                                "tournament_id": tournament.id,
-                            }
-                        )
-                        try:
-                            self.logger.debug(
-                                "Trying to create team and tournament connection after parse"
-                            )
-                            team_tournament_connection = await team_tournament_service.create(
-                                dict_conv
-                            )
-                            created_team_tournament_ids.append(team_tournament_connection)
-                        except Exception as ex:
-                            self.logger.error(
-                                f"Error create team and tournament connection after parse {ex}",
-                                exc_info=True,
-                            )
-                self.logger.info(f"Created teams after parsing: {created_teams}")
-                self.logger.info(
-                    f"Created team tournament connections after parsing: {created_team_tournament_ids}"
-                )
-
-                return created_teams
-            else:
-                self.logger.warning("Team list is empty")
-                return []
+            parser = team_parser(db)
+            created_teams, _ = await parser.parse_and_create(eesl_tournament_id)
+            return created_teams
 
         @router.get(
             "/pars/team/{eesl_team_id}",
