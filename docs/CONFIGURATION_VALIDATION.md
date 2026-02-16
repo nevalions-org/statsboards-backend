@@ -59,16 +59,19 @@ def validate_ssl_files(self) -> Self:
 Implemented comprehensive path validation in `validate_paths_exist()` method:
 
 **Required paths**:
+
 - `static_main_path`: Static files directory
 - `uploads_path`: Uploads directory
 
 **Optional paths** (logged as warnings if missing):
+
 - `template_path`: Frontend template directory
 - `static_path`: Frontend static directory
 - `ssl_keyfile`: SSL private key (if SSL is configured)
 - `ssl_certfile`: SSL certificate (if SSL is configured)
 
 Validation checks:
+
 - Path existence
 - Readability permissions
 
@@ -195,6 +198,7 @@ Created standalone configuration validation script:
 Created extensive test suites:
 
 #### Configuration Tests (`tests/test_config.py`)
+
 - 26 tests covering all configuration validators
 - Database settings validation tests
 - Application settings validation tests
@@ -203,6 +207,7 @@ Created extensive test suites:
 - CORS origins validation tests
 
 #### Database Connection Validation Tests (`tests/test_database_connection_validation.py`)
+
 - 4 tests for database connection validation
 - Version retrieval test
 - Database name retrieval test
@@ -236,6 +241,7 @@ When football events occur rapidly (10-30 events per minute), this throttle ensu
 **Environment Variable**: `STATS_THROTTLE_SECONDS`
 
 Example:
+
 ```bash
 # Default: 2 seconds
 export STATS_THROTTLE_SECONDS=2
@@ -250,13 +256,13 @@ export STATS_THROTTLE_SECONDS=5
 
 Connection pool settings are configurable via environment variables:
 
-| Environment Variable | Description | Production Default | Test Default |
-|---------------------|-------------|-------------------|--------------|
-| `DB_POOL_SIZE` | Base pool size | 8 | 3 |
-| `DB_POOL_MAX_OVERFLOW` | Max overflow connections | 12 | 5 |
-| (hardcoded) | `pool_timeout` | 30s | 30s |
+| Environment Variable   | Description              | Production Default | Test Default |
+| ---------------------- | ------------------------ | ------------------ | ------------ |
+| `DB_POOL_SIZE`         | Base pool size           | 5                  | 3            |
+| `DB_POOL_MAX_OVERFLOW` | Max overflow connections | 5                  | 5            |
+| (hardcoded)            | `pool_timeout`           | 30s                | 30s          |
 
-**Total max connections**: `pool_size + max_overflow` (20 for production, 8 for test)
+**Total max connections**: `pool_size + max_overflow` (10 for production, 8 for test)
 
 ### Pool Timeout Handling
 
@@ -273,12 +279,14 @@ session = await get_connection_with_retry(
 ```
 
 **Behavior**:
+
 - Attempts to acquire a connection up to `max_retries` times
 - Uses exponential backoff: `delay = base_delay * (2 ** attempt)`
 - Logs warnings on each retry attempt
 - Raises `PoolTimeout` if all retries exhausted
 
 **Example retry sequence** (default settings):
+
 1. Attempt 1: Immediate
 2. Attempt 2: Wait 0.1s
 3. Attempt 3: Wait 0.2s

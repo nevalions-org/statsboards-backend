@@ -63,10 +63,9 @@ async def get_connection_with_retry(
 
 
 # Default pool settings - can be overridden via environment variables
-# Production defaults: 8 base + 12 overflow = 20 max per pod
 # Test defaults: 3 base + 5 overflow = 8 max
-DEFAULT_POOL_SIZE = 8
-DEFAULT_MAX_OVERFLOW = 12
+DEFAULT_POOL_SIZE = 5
+DEFAULT_MAX_OVERFLOW = 5
 DEFAULT_TEST_POOL_SIZE = 3
 DEFAULT_TEST_MAX_OVERFLOW = 5
 
