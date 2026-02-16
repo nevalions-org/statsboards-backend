@@ -2,6 +2,7 @@ import asyncio
 
 from fastapi import HTTPException
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.models import (
     BaseServiceDB,
@@ -50,11 +51,23 @@ class ScoreboardServiceDB(BaseServiceDB):
         self.logger.debug("Initialized ScoreboardServiceDB")
 
     @handle_service_exceptions(item_name=ITEM, operation="creating")
-    async def create(self, item: ScoreboardSchemaCreate) -> ScoreboardDB:
+    async def create(
+        self,
+        item: ScoreboardSchemaCreate,
+        *,
+        session: AsyncSession | None = None,
+    ) -> ScoreboardDB:
+        """Create a scoreboard.
+
+        Args:
+            item: The scoreboard data to create.
+            session: Optional session for transaction batching.
+                     If provided, caller is responsible for commit/rollback.
+        """
         self.logger.debug(f"Create scoreboard: {item}")
         if item.match_id is not None:
             supports_playclock, supports_timeouts = await self._get_match_feature_capabilities(
-                item.match_id
+                item.match_id, session=session
             )
             item = self._apply_capability_guards_on_create(
                 item,
@@ -63,12 +76,52 @@ class ScoreboardServiceDB(BaseServiceDB):
             )
 
         if item.match_id is not None:
-            is_exist = await self.get_scoreboard_by_match_id(item.match_id)
+            is_exist = await self._get_scoreboard_by_match_id_with_session(
+                item.match_id, session=session
+            )
             if is_exist:
                 self.logger.info(f"Scoreboard already exists: {is_exist}")
                 return is_exist
+
+        if session is not None:
+            return await self._create_with_session(item, session)
         result = await super().create(item)
         return result  # type: ignore
+
+    async def _create_with_session(
+        self,
+        item: ScoreboardSchemaCreate,
+        session: AsyncSession,
+    ) -> ScoreboardDB:
+        """Create scoreboard using provided session (no commit)."""
+        from pydantic import BaseModel
+
+        self.logger.debug(f"Create scoreboard with session: {item}")
+        if isinstance(item, BaseModel):
+            item_to_add = ScoreboardDB(**item.model_dump())
+        else:
+            item_to_add = item
+
+        session.add(item_to_add)
+        await session.flush()
+        await session.refresh(item_to_add)
+        self.logger.info(f"Scoreboard created with session: {item_to_add}")
+        return item_to_add
+
+    async def _get_scoreboard_by_match_id_with_session(
+        self,
+        match_id: int,
+        *,
+        session: AsyncSession | None = None,
+    ) -> ScoreboardDB | None:
+        """Get scoreboard by match_id, optionally using provided session."""
+        if session is not None:
+            self.logger.debug(f"Get scoreboard by match id:{match_id} with session")
+            result = await session.scalars(
+                select(ScoreboardDB).where(ScoreboardDB.match_id == match_id)
+            )
+            return result.one_or_none()
+        return await self.get_scoreboard_by_match_id(match_id)
 
         #     session.add(match_result)
         #     await session.commit()
@@ -87,8 +140,18 @@ class ScoreboardServiceDB(BaseServiceDB):
         self,
         item_id: int,
         item: ScoreboardSchemaUpdate,
+        *,
+        session: AsyncSession | None = None,
         **kwargs,
     ) -> ScoreboardDB:
+        """Update a scoreboard.
+
+        Args:
+            item_id: The scoreboard ID to update.
+            item: The update data.
+            session: Optional session for transaction batching.
+                     If provided, caller is responsible for commit/rollback.
+        """
         self.logger.debug(f"Update scoreboard id:{item_id} data: {item}")
         match_id = item.match_id
         if match_id is None:
@@ -100,7 +163,7 @@ class ScoreboardServiceDB(BaseServiceDB):
         supports_timeouts = True
         if match_id is not None:
             supports_playclock, supports_timeouts = await self._get_match_feature_capabilities(
-                match_id
+                match_id, session=session
             )
             item = self._apply_capability_guards_on_update(
                 item,
@@ -108,17 +171,46 @@ class ScoreboardServiceDB(BaseServiceDB):
                 supports_timeouts=supports_timeouts,
             )
 
-        updated_ = await super().update(
-            item_id,
-            item,
-            **kwargs,
-        )
+        if session is not None:
+            updated_ = await self._update_with_session(item_id, item, session)
+        else:
+            updated_ = await super().update(
+                item_id,
+                item,
+                **kwargs,
+            )
         if updated_ is not None:
             self.logger.debug(f"Updated scoreboard: {updated_}")
             updated_.has_timeouts = supports_timeouts
             updated_.has_playclock = supports_playclock
         # await self.trigger_update_scoreboard(item_id)
         return updated_  # type: ignore
+
+    async def _update_with_session(
+        self,
+        item_id: int,
+        item: ScoreboardSchemaUpdate,
+        session: AsyncSession,
+    ) -> ScoreboardDB | None:
+        """Update scoreboard using provided session (no commit)."""
+        self.logger.debug(f"Update scoreboard with session id:{item_id}")
+
+        result = await session.execute(select(ScoreboardDB).where(ScoreboardDB.id == item_id))
+        updated_item = result.scalars().one_or_none()
+
+        if not updated_item:
+            self.logger.warning(f"No scoreboard found with id: {item_id}")
+            return None
+
+        update_data = item.model_dump(exclude_unset=True, exclude_none=True)
+
+        for key, value in update_data.items():
+            setattr(updated_item, key, value)
+
+        await session.flush()
+        await session.refresh(updated_item)
+        self.logger.info(f"Scoreboard updated with session: {updated_item}")
+        return updated_item
 
     async def get_scoreboard_by_match_id(
         self,
@@ -134,16 +226,29 @@ class ScoreboardServiceDB(BaseServiceDB):
     async def create_or_update_scoreboard(
         self,
         scoreboard: ScoreboardSchemaCreate | ScoreboardSchemaUpdate,
+        *,
+        session: AsyncSession | None = None,
     ) -> ScoreboardDB:
+        """Create or update a scoreboard.
+
+        Args:
+            scoreboard: The scoreboard data.
+            session: Optional session for transaction batching.
+                     If provided, caller is responsible for commit/rollback.
+        """
         self.logger.debug(f"Create or update scoreboard: {scoreboard}")
         existing_scoreboard = None
         if scoreboard.match_id is not None:
-            existing_scoreboard = await self.get_scoreboard_by_match_id(scoreboard.match_id)
+            existing_scoreboard = await self._get_scoreboard_by_match_id_with_session(
+                scoreboard.match_id, session=session
+            )
 
         if existing_scoreboard:
             self.logger.info("Scoreboard already exists")
             if isinstance(scoreboard, ScoreboardSchemaUpdate):
-                updated_scoreboard = await self.update(existing_scoreboard.id, scoreboard)
+                updated_scoreboard = await self.update(
+                    existing_scoreboard.id, scoreboard, session=session
+                )
                 self.logger.debug("Updated scoreboard")
             else:
                 self.logger.warning("Wrong Schema for updating scoreboard")
@@ -152,32 +257,41 @@ class ScoreboardServiceDB(BaseServiceDB):
         else:
             self.logger.debug("Scoreboard does not exist")
             if isinstance(scoreboard, ScoreboardSchemaCreate):
-                new_scoreboard = await self.create(scoreboard)
+                new_scoreboard = await self.create(scoreboard, session=session)
                 self.logger.info("Scoreboard created")
             else:
                 self.logger.warning("Wrong Schema for creating scoreboard")
                 raise ValueError("Must use ScoreboardSchemaCreate for creating.")
         return new_scoreboard
 
-    async def _get_match_feature_capabilities(self, match_id: int) -> tuple[bool, bool]:
+    async def _get_match_feature_capabilities(
+        self,
+        match_id: int,
+        *,
+        session: AsyncSession | None = None,
+    ) -> tuple[bool, bool]:
         """Return (supports_playclock, supports_timeouts) for match's sport preset."""
-        async with self.db.get_session_maker()() as session:
-            stmt = (
-                select(
-                    SportScoreboardPresetDB.has_playclock,
-                    SportScoreboardPresetDB.has_timeouts,
-                )
-                .select_from(MatchDB)
-                .join(TournamentDB, MatchDB.tournament_id == TournamentDB.id)
-                .join(SportDB, TournamentDB.sport_id == SportDB.id)
-                .join(
-                    SportScoreboardPresetDB,
-                    SportDB.scoreboard_preset_id == SportScoreboardPresetDB.id,
-                    isouter=True,
-                )
-                .where(MatchDB.id == match_id)
+        stmt = (
+            select(
+                SportScoreboardPresetDB.has_playclock,
+                SportScoreboardPresetDB.has_timeouts,
             )
+            .select_from(MatchDB)
+            .join(TournamentDB, MatchDB.tournament_id == TournamentDB.id)
+            .join(SportDB, TournamentDB.sport_id == SportDB.id)
+            .join(
+                SportScoreboardPresetDB,
+                SportDB.scoreboard_preset_id == SportScoreboardPresetDB.id,
+                isouter=True,
+            )
+            .where(MatchDB.id == match_id)
+        )
+
+        if session is not None:
             row = (await session.execute(stmt)).one_or_none()
+        else:
+            async with self.db.get_session_maker()() as sess:
+                row = (await sess.execute(stmt)).one_or_none()
 
         if row is None:
             return True, True

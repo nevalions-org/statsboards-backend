@@ -1,4 +1,5 @@
 from sqlalchemy import func, or_, select
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload, selectinload
 
 from src.core.models import (
@@ -45,8 +46,62 @@ class MatchServiceDB(ServiceRegistryAccessorMixin, BaseServiceDB):
         self.logger.debug(f"Starting to create MatchDB with data: {item.__dict__}")
         return await super().create(item)
 
-    async def create_or_update_match(self, m: MatchSchemaCreate) -> MatchDB:
+    async def create_or_update_match(
+        self,
+        m: MatchSchemaCreate,
+        *,
+        session: AsyncSession | None = None,
+    ) -> MatchDB:
+        """Create or update a match.
+
+        Args:
+            m: The match data.
+            session: Optional session for transaction batching.
+                     If provided, caller is responsible for commit/rollback.
+        """
+        if session is not None:
+            return await self._create_or_update_match_with_session(m, session)
         return await super().create_or_update(m, eesl_field_name="match_eesl_id")
+
+    async def _create_or_update_match_with_session(
+        self,
+        m: MatchSchemaCreate,
+        session: AsyncSession,
+    ) -> MatchDB:
+        """Create or update match using provided session (no commit)."""
+        from pydantic import BaseModel
+
+        self.logger.debug(f"Create or update match with session: {m}")
+
+        # Check if match exists by eesl_id
+        field_value = getattr(m, "match_eesl_id", None)
+        if field_value:
+            result = await session.execute(
+                select(MatchDB).where(MatchDB.match_eesl_id == field_value)
+            )
+            existing_item = result.scalars().one_or_none()
+
+            if existing_item:
+                self.logger.debug(f"Match exists, updating: {existing_item.id}")
+                update_data = m.model_dump(exclude_unset=True, exclude_none=True)
+                for key, value in update_data.items():
+                    setattr(existing_item, key, value)
+                await session.flush()
+                await session.refresh(existing_item)
+                return existing_item
+
+        # Create new match
+        self.logger.debug("Creating new match with session")
+        if isinstance(m, BaseModel):
+            item_to_add = MatchDB(**m.model_dump())
+        else:
+            item_to_add = m
+
+        session.add(item_to_add)
+        await session.flush()
+        await session.refresh(item_to_add)
+        self.logger.info(f"Match created with session: {item_to_add}")
+        return item_to_add
 
     async def get_match_by_eesl_id(
         self,
@@ -131,24 +186,71 @@ class MatchServiceDB(ServiceRegistryAccessorMixin, BaseServiceDB):
         operation="fetching sport by match_id",
         return_value_on_not_found=None,
     )
-    async def get_sport_by_match_id(self, match_id: int) -> SportDB | None:
+    async def get_sport_by_match_id(
+        self,
+        match_id: int,
+        *,
+        session: AsyncSession | None = None,
+    ) -> SportDB | None:
+        """Get sport by match ID.
+
+        Args:
+            match_id: The match ID.
+            session: Optional session for transaction batching.
+        """
         self.logger.debug(f"Get sport by {ITEM} id:{match_id}")
+
+        if session is not None:
+            return await self._get_sport_by_match_id_with_session(match_id, session)
+
         tournament_service = self.service_registry.get("tournament")
         match = await self.get_by_id(match_id)
         if match:
             tournament = await tournament_service.get_by_id(match.tournament_id)
             if tournament:
-                async with self.db.get_session_maker()() as session:
+                async with self.db.get_session_maker()() as sess:
                     stmt = (
                         select(SportDB)
                         .where(SportDB.id == tournament.sport_id)
                         .options(joinedload(SportDB.scoreboard_preset))
                     )
-                    result = await session.execute(stmt)
+                    result = await sess.execute(stmt)
                     sport = result.scalar_one_or_none()
                     self.logger.debug(f"Get sport by {ITEM} id:{match_id} returned sport:{sport}")
                     return sport
         return None
+
+    async def _get_sport_by_match_id_with_session(
+        self,
+        match_id: int,
+        session: AsyncSession,
+    ) -> SportDB | None:
+        """Get sport by match ID using provided session."""
+
+        self.logger.debug(f"Get sport by {ITEM} id:{match_id} with session")
+
+        # Get match and tournament in one query
+        stmt = (
+            select(MatchDB).where(MatchDB.id == match_id).options(joinedload(MatchDB.tournaments))
+        )
+        result = await session.execute(stmt)
+        match = result.scalar_one_or_none()
+
+        if not match or not match.tournaments:
+            return None
+
+        tournament = match.tournaments
+
+        # Get sport with preset
+        stmt_sport = (
+            select(SportDB)
+            .where(SportDB.id == tournament.sport_id)
+            .options(joinedload(SportDB.scoreboard_preset))
+        )
+        result_sport = await session.execute(stmt_sport)
+        sport = result_sport.scalar_one_or_none()
+        self.logger.debug(f"Get sport by {ITEM} id:{match_id} with session returned sport:{sport}")
+        return sport
 
     @handle_service_exceptions(
         item_name=ITEM,
@@ -217,8 +319,20 @@ class MatchServiceDB(ServiceRegistryAccessorMixin, BaseServiceDB):
     async def get_teams_by_match(
         self,
         match_id: int,
+        *,
+        session: AsyncSession | None = None,
     ) -> dict | None:
+        """Get teams by match ID.
+
+        Args:
+            match_id: The match ID.
+            session: Optional session for transaction batching.
+        """
         self.logger.debug(f"Get teams v2 by {ITEM} id:{match_id}")
+
+        if session is not None:
+            return await self._get_teams_by_match_with_session(match_id, session)
+
         match = await self.get_related_items(
             match_id,
         )
@@ -235,6 +349,33 @@ class MatchServiceDB(ServiceRegistryAccessorMixin, BaseServiceDB):
             return {
                 "team_a": team_a.__dict__,
                 "team_b": team_b.__dict__,
+            }
+        return None
+
+    async def _get_teams_by_match_with_session(
+        self,
+        match_id: int,
+        session: AsyncSession,
+    ) -> dict | None:
+        """Get teams by match ID using provided session."""
+        self.logger.debug(f"Get teams v2 by {ITEM} id:{match_id} with session")
+
+        # Get match with teams in one query
+        stmt = (
+            select(MatchDB)
+            .where(MatchDB.id == match_id)
+            .options(
+                joinedload(MatchDB.team_a),
+                joinedload(MatchDB.team_b),
+            )
+        )
+        result = await session.execute(stmt)
+        match = result.scalar_one_or_none()
+
+        if match and match.team_a and match.team_b:
+            return {
+                "team_a": match.team_a.__dict__,
+                "team_b": match.team_b.__dict__,
             }
         return None
 

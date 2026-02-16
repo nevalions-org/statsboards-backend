@@ -3,6 +3,7 @@ import time
 
 from fastapi import HTTPException
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.enums import ClockStatus
 from src.core.models import BaseServiceDB, PlayClockDB, handle_service_exceptions
@@ -30,15 +31,67 @@ class PlayClockServiceDB(BaseServiceDB):
         clock_orchestrator.set_playclock_stop_callback(self._stop_playclock_internal)
 
     @handle_service_exceptions(item_name=ITEM, operation="creating")
-    async def create(self, item: PlayClockSchemaCreate) -> PlayClockDB:
+    async def create(
+        self,
+        item: PlayClockSchemaCreate,
+        *,
+        session: AsyncSession | None = None,
+    ) -> PlayClockDB:
+        """Create a playclock.
+
+        Args:
+            item: The playclock data to create.
+            session: Optional session for transaction batching.
+                     If provided, caller is responsible for commit/rollback.
+        """
         self.logger.debug(f"Create playclock: {item}")
         if item.match_id is not None:
-            is_exist = await self.get_playclock_by_match_id(item.match_id)
+            is_exist = await self._get_playclock_by_match_id_with_session(
+                item.match_id, session=session
+            )
             if is_exist is not None:
                 self.logger.info(f"Playclock already exists: {is_exist}")
                 return is_exist
+
+        if session is not None:
+            return await self._create_with_session(item, session)
         result = await super().create(item)
         return result  # type: ignore
+
+    async def _create_with_session(
+        self,
+        item: PlayClockSchemaCreate,
+        session: AsyncSession,
+    ) -> PlayClockDB:
+        """Create playclock using provided session (no commit)."""
+        from pydantic import BaseModel
+
+        self.logger.debug(f"Create playclock with session: {item}")
+        if isinstance(item, BaseModel):
+            item_to_add = PlayClockDB(**item.model_dump())
+        else:
+            item_to_add = item
+
+        session.add(item_to_add)
+        await session.flush()
+        await session.refresh(item_to_add)
+        self.logger.info(f"Playclock created with session: {item_to_add}")
+        return item_to_add
+
+    async def _get_playclock_by_match_id_with_session(
+        self,
+        match_id: int,
+        *,
+        session: AsyncSession | None = None,
+    ) -> PlayClockDB | None:
+        """Get playclock by match_id, optionally using provided session."""
+        if session is not None:
+            self.logger.debug(f"Get playclock by match id:{match_id} with session")
+            result = await session.scalars(
+                select(PlayClockDB).where(PlayClockDB.match_id == match_id)
+            )
+            return result.one_or_none()
+        return await self.get_playclock_by_match_id(match_id)
 
     async def _stop_playclock_internal(self, playclock_id: int) -> None:
         """Handle playclock stop when it reaches 0"""

@@ -2,6 +2,7 @@ from typing import Any
 
 from fastapi import BackgroundTasks
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.decorators import handle_service_exceptions
 from src.core.enums import PeriodClockVariant
@@ -33,19 +34,66 @@ class MatchDataServiceDB(BaseServiceDB):
         self.logger.debug("Initialized MatchDataServiceDB")
 
     @handle_service_exceptions(item_name=ITEM, operation="creating")
-    async def create(self, item: MatchDataSchemaCreate) -> MatchDataDB:
-        self.logger.debug(f"Creat {ITEM}:{item}")
+    async def create(
+        self,
+        item: MatchDataSchemaCreate,
+        *,
+        session: AsyncSession | None = None,
+    ) -> MatchDataDB:
+        """Create match data.
+
+        Args:
+            item: The match data to create.
+            session: Optional session for transaction batching.
+                     If provided, caller is responsible for commit/rollback.
+        """
+        self.logger.debug(f"Create {ITEM}:{item}")
+        if session is not None:
+            return await self._create_with_session(item, session)
         result = await super().create(item)
         return result  # type: ignore
+
+    async def _create_with_session(
+        self,
+        item: MatchDataSchemaCreate,
+        session: AsyncSession,
+    ) -> MatchDataDB:
+        """Create match data using provided session (no commit)."""
+        from pydantic import BaseModel
+
+        self.logger.debug(f"Create match data with session: {item}")
+        if isinstance(item, BaseModel):
+            item_to_add = MatchDataDB(**item.model_dump())
+        else:
+            item_to_add = item
+
+        session.add(item_to_add)
+        await session.flush()
+        await session.refresh(item_to_add)
+        self.logger.info(f"Match data created with session: {item_to_add}")
+        return item_to_add
 
     @handle_service_exceptions(item_name=ITEM, operation="updating", return_value_on_not_found=None)
     async def update(
         self,
         item_id: int,
         item: Any,
+        *,
+        session: AsyncSession | None = None,
         **kwargs,
     ) -> MatchDataDB | None:
+        """Update match data.
+
+        Args:
+            item_id: The match data ID to update.
+            item: The update data.
+            session: Optional session for transaction batching.
+                     If provided, caller is responsible for commit/rollback.
+        """
         self.logger.debug(f"Updating matchdata item_id: {item_id}")
+
+        if session is not None:
+            return await self._update_with_session(item_id, item, session)
 
         existing_item = await self.get_by_id(item_id)
         update_payload = item.model_dump(exclude_unset=True)
@@ -73,6 +121,32 @@ class MatchDataServiceDB(BaseServiceDB):
         # await self.trigger_update_match_data(item_id)
         self.logger.info("Matchdata updated successfully")
         return updated_
+
+    async def _update_with_session(
+        self,
+        item_id: int,
+        item: Any,
+        session: AsyncSession,
+    ) -> MatchDataDB | None:
+        """Update match data using provided session (no commit)."""
+        self.logger.debug(f"Update match data with session item_id: {item_id}")
+
+        result = await session.execute(select(MatchDataDB).where(MatchDataDB.id == item_id))
+        updated_item = result.scalars().one_or_none()
+
+        if not updated_item:
+            self.logger.warning(f"No matchdata found with id: {item_id}")
+            return None
+
+        update_data = item.model_dump(exclude_unset=True, exclude_none=True)
+
+        for key, value in update_data.items():
+            setattr(updated_item, key, value)
+
+        await session.flush()
+        await session.refresh(updated_item)
+        self.logger.info(f"Matchdata updated with session: {updated_item}")
+        return updated_item
 
     @staticmethod
     def _is_period_transition(
@@ -169,13 +243,33 @@ class MatchDataServiceDB(BaseServiceDB):
     @handle_service_exceptions(
         item_name=ITEM, operation="fetching by match id", return_value_on_not_found=None
     )
-    async def get_match_data_by_match_id(self, match_id: int) -> MatchDataDB | None:
+    async def get_match_data_by_match_id(
+        self,
+        match_id: int,
+        *,
+        session: AsyncSession | None = None,
+    ) -> MatchDataDB | None:
+        """Get match data by match ID.
+
+        Args:
+            match_id: The match ID to look up.
+            session: Optional session for transaction batching.
+        """
         self.logger.debug(f"Get {ITEM} by match id: {match_id}")
 
-        async with self.db.get_session_maker()() as session:
+        if session is not None:
             result = await session.scalars(
                 select(MatchDataDB).where(MatchDataDB.match_id == match_id)
             )
+            if result:
+                self.logger.debug("get_match_data_by_match_id completed successfully.")
+                return result.one_or_none()
+            else:
+                self.logger.debug(f"No matchdata in match with match_id: {match_id}")
+                return None
+
+        async with self.db.get_session_maker()() as sess:
+            result = await sess.scalars(select(MatchDataDB).where(MatchDataDB.match_id == match_id))
             if result:
                 self.logger.debug("get_match_data_by_match_id completed successfully.")
                 return result.one_or_none()

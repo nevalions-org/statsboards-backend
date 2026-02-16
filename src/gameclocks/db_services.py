@@ -3,6 +3,7 @@ import time
 
 from pydantic import BaseModel
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.decorators import handle_service_exceptions
 from src.core.enums import ClockDirection, ClockStatus, PeriodClockVariant
@@ -86,14 +87,64 @@ class GameClockServiceDB(BaseServiceDB):
         clock_orchestrator.set_gameclock_stop_callback(self._stop_gameclock_internal)
 
     @handle_service_exceptions(item_name="GAMECLOCK", operation="creating")
-    async def create(self, item: GameClockSchemaCreate) -> GameClockDB:
+    async def create(
+        self,
+        item: GameClockSchemaCreate,
+        *,
+        session: AsyncSession | None = None,
+    ) -> GameClockDB:
+        """Create a gameclock.
+
+        Args:
+            item: The gameclock data to create.
+            session: Optional session for transaction batching.
+                     If provided, caller is responsible for commit/rollback.
+        """
         self.logger.debug(f"Create gameclock: {item}")
         if item.match_id is not None:
-            is_exist = await self.get_gameclock_by_match_id(item.match_id)
+            is_exist = await self._get_gameclock_by_match_id_with_session(
+                item.match_id, session=session
+            )
             if is_exist:
                 self.logger.info(f"gameclock already exists: {is_exist}")
                 return is_exist
+
+        if session is not None:
+            return await self._create_with_session(item, session)
         return await super().create(item)
+
+    async def _create_with_session(
+        self,
+        item: GameClockSchemaCreate,
+        session: AsyncSession,
+    ) -> GameClockDB:
+        """Create gameclock using provided session (no commit)."""
+        self.logger.debug(f"Create gameclock with session: {item}")
+        if isinstance(item, BaseModel):
+            item_to_add = GameClockDB(**item.model_dump())
+        else:
+            item_to_add = item
+
+        session.add(item_to_add)
+        await session.flush()
+        await session.refresh(item_to_add)
+        self.logger.info(f"Gameclock created with session: {item_to_add}")
+        return item_to_add
+
+    async def _get_gameclock_by_match_id_with_session(
+        self,
+        match_id: int,
+        *,
+        session: AsyncSession | None = None,
+    ) -> GameClockDB | None:
+        """Get gameclock by match_id, optionally using provided session."""
+        if session is not None:
+            self.logger.debug(f"Get gameclock by match id:{match_id} with session")
+            result = await session.scalars(
+                select(GameClockDB).where(GameClockDB.match_id == match_id)
+            )
+            return result.one_or_none()
+        return await self.get_gameclock_by_match_id(match_id)
 
     async def _stop_gameclock_internal(self, gameclock_id: int) -> None:
         """Persist terminal gameclock state and clean up runtime clock resources."""
