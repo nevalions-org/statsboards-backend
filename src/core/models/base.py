@@ -1,9 +1,11 @@
+import asyncio
 import os
 from typing import Any, Callable
 
 from fastapi import HTTPException
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.exc import TimeoutError as PoolTimeout
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
@@ -27,6 +29,38 @@ from src.core.models.mixins import (
 from src.logging_config import get_logger
 
 db_logger_helper = get_logger("db")
+
+
+async def get_connection_with_retry(
+    session_maker: Any, max_retries: int = 3, base_delay: float = 0.1
+) -> Any:
+    """Get a database session with exponential backoff retry on pool exhaustion.
+
+    Args:
+        session_maker: The async sessionmaker to create sessions from
+        max_retries: Maximum number of retry attempts (default 3)
+        base_delay: Base delay in seconds for exponential backoff (default 0.1)
+
+    Returns:
+        A new database session
+
+    Raises:
+        PoolTimeout: If all retry attempts are exhausted
+    """
+    for attempt in range(max_retries):
+        try:
+            return session_maker()
+        except PoolTimeout:
+            if attempt == max_retries - 1:
+                raise
+            delay = base_delay * (2**attempt)
+            db_logger_helper.warning(
+                f"Connection pool exhausted, retrying in {delay}s "
+                f"(attempt {attempt + 1}/{max_retries})"
+            )
+            await asyncio.sleep(delay)
+    return session_maker()
+
 
 # Default pool settings - can be overridden via environment variables
 # Production defaults: 8 base + 12 overflow = 20 max per pod
@@ -67,6 +101,7 @@ class Database:
                 pool_size=pool_size,
                 max_overflow=max_overflow,
                 pool_pre_ping=True,
+                pool_timeout=30,
             )
             self.async_session: Any = async_sessionmaker(
                 bind=self.engine, class_=AsyncSession, expire_on_commit=False
