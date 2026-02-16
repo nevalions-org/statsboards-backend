@@ -28,8 +28,8 @@ from src.core.models.base import Database
 
 async def create_admin() -> int:
     """Create admin user from environment variables."""
-    username = os.getenv("ADMIN_USERNAME")
-    email = os.getenv("ADMIN_EMAIL")
+    username = os.getenv("ADMIN_USERNAME", "admin")
+    email = os.getenv("ADMIN_EMAIL", "admin@example.com")
     password = os.getenv("ADMIN_PASSWORD")
 
     if not password:
@@ -37,6 +37,8 @@ async def create_admin() -> int:
         return 1
 
     print(f"Creating admin user: {username} ({email})")
+    print(f"DB_HOST: {os.getenv('DB_HOST')}")
+    print(f"DB_NAME: {os.getenv('DB_NAME')}")
 
     db = Database(settings.db.db_url)
 
@@ -55,7 +57,7 @@ async def create_admin() -> int:
             if existing_user:
                 existing_user.email = email
                 existing_user.hashed_password = get_password_hash(password)
-                session.add(existing_user)
+                await session.flush()
 
                 result = await session.execute(
                     select(UserRoleDB).where(
@@ -67,7 +69,7 @@ async def create_admin() -> int:
                     session.add(UserRoleDB(user_id=existing_user.id, role_id=admin_role.id))
 
                 await session.commit()
-                print(f"Updated existing user '{username}' with admin role")
+                print(f"Updated existing user '{username}' with new credentials and admin role")
                 return 0
 
             user = UserDB(
@@ -86,7 +88,10 @@ async def create_admin() -> int:
             return 0
 
     except Exception as e:
+        import traceback
+
         print(f"ERROR: Failed to create admin user: {e}")
+        traceback.print_exc()
         return 1
 
 
