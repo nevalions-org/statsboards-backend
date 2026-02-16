@@ -107,12 +107,26 @@ class MatchServiceDB(ServiceRegistryAccessorMixin, BaseServiceDB):
         self,
         value: int | str,
         field_name: str = "match_eesl_id",
+        *,
+        session: AsyncSession | None = None,
     ) -> MatchDB | None:
+        if session is not None:
+            return await self._get_match_by_field_with_session(value, field_name, session)
         self.logger.debug(f"Get {ITEM} {field_name}:{value}")
         return await self.get_item_by_field_value(
             value=value,
             field_name=field_name,
         )
+
+    async def _get_match_by_field_with_session(
+        self,
+        value: int | str,
+        field_name: str,
+        session: AsyncSession,
+    ) -> MatchDB | None:
+        self.logger.debug(f"Get {ITEM} {field_name}:{value} with session")
+        result = await session.execute(select(MatchDB).where(getattr(MatchDB, field_name) == value))
+        return result.scalars().one_or_none()
 
     async def update(
         self,

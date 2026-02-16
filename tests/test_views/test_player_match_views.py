@@ -72,7 +72,9 @@ class TestPlayerMatchViews:
             team_id=team.id,
         )
 
-        response = await client_player.post("/api/players_match/", json=player_match_data.model_dump())
+        response = await client_player.post(
+            "/api/players_match/", json=player_match_data.model_dump()
+        )
 
         assert response.status_code == 200
         assert response.json()["id"] > 0
@@ -312,7 +314,9 @@ class TestPlayerMatchViews:
         assert response.status_code == 404
 
     @pytest.mark.slow
-    async def test_create_parsed_eesl_match_with_timeout_skip(self, client_player, test_db, monkeypatch):
+    async def test_create_parsed_eesl_match_with_timeout_skip(
+        self, client_player, test_db, monkeypatch
+    ):
         """Test that match parsing skips players when collect_player_full_data_eesl times out."""
         sport_service = SportServiceDB(test_db)
         sport = await sport_service.create(SportFactorySample.build())
@@ -345,7 +349,7 @@ class TestPlayerMatchViews:
             return None
 
         monkeypatch.setattr(
-            "src.player_match.views.collect_player_full_data_eesl",
+            "src.player_match.parser.collect_player_full_data_eesl",
             mock_timeout_return_none,
         )
 
@@ -437,7 +441,7 @@ class TestPlayerMatchViews:
             return mock_parsed_match
 
         monkeypatch.setattr(
-            "src.player_match.views.parse_match_and_create_jsons",
+            "src.player_match.parser.parse_match_and_create_jsons",
             mock_parse,
         )
 
@@ -445,7 +449,9 @@ class TestPlayerMatchViews:
 
         assert response.status_code == 200
 
-    async def test_create_parsed_eesl_match_endpoint_success(self, client_player, test_db, monkeypatch):
+    async def test_create_parsed_eesl_match_endpoint_success(
+        self, client_player, test_db, monkeypatch
+    ):
         """Test create parsed eesl match endpoint with successful parsing."""
         from src.pars_eesl.pars_match import ParsedMatch, ParsedMatchPlayer
 
@@ -537,11 +543,11 @@ class TestPlayerMatchViews:
             return None
 
         monkeypatch.setattr(
-            "src.player_match.views.parse_match_and_create_jsons",
+            "src.player_match.parser.parse_match_and_create_jsons",
             mock_parse,
         )
         monkeypatch.setattr(
-            "src.player_match.views.collect_player_full_data_eesl",
+            "src.player_match.parser.collect_player_full_data_eesl",
             mock_collect_player,
         )
 
@@ -550,7 +556,9 @@ class TestPlayerMatchViews:
         assert response.status_code == 200
         assert isinstance(response.json(), list)
 
-    async def test_create_parsed_eesl_match_endpoint_no_match(self, client_player, test_db, monkeypatch):
+    async def test_create_parsed_eesl_match_endpoint_no_match(
+        self, client_player, test_db, monkeypatch
+    ):
         """Test create parsed eesl match endpoint when match not found."""
         from src.pars_eesl.pars_match import ParsedMatch
 
@@ -585,7 +593,7 @@ class TestPlayerMatchViews:
             return mock_parsed_match
 
         monkeypatch.setattr(
-            "src.player_match.views.parse_match_and_create_jsons",
+            "src.player_match.parser.parse_match_and_create_jsons",
             mock_parse,
         )
 
@@ -594,14 +602,16 @@ class TestPlayerMatchViews:
         assert response.status_code == 200
         assert response.json() == []
 
-    async def test_create_parsed_eesl_match_endpoint_error(self, client_player, test_db, monkeypatch):
+    async def test_create_parsed_eesl_match_endpoint_error(
+        self, client_player, test_db, monkeypatch
+    ):
         """Test create parsed eesl match endpoint error handling."""
 
         async def mock_parse_raises(*args, **kwargs):
             raise Exception("Parse error")
 
         monkeypatch.setattr(
-            "src.player_match.views.parse_match_and_create_jsons",
+            "src.player_match.parser.parse_match_and_create_jsons",
             mock_parse_raises,
         )
 

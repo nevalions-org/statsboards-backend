@@ -2,7 +2,7 @@ from unittest.mock import patch
 
 import pytest
 
-from src.player_match.views import photo_files_exist
+from src.helpers.photo_utils import photo_files_exist
 
 
 class TestPhotoFilesExist:

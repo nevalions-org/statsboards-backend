@@ -224,7 +224,7 @@ class TestPlayerMatchViewsMore:
             return None
 
         monkeypatch.setattr(
-            "src.player_match.views.parse_match_and_create_jsons",
+            "src.player_match.parser.parse_match_and_create_jsons",
             mock_parse_none,
         )
 
@@ -332,11 +332,11 @@ class TestPlayerMatchViewsMore:
             return None
 
         monkeypatch.setattr(
-            "src.player_match.views.parse_match_and_create_jsons",
+            "src.player_match.parser.parse_match_and_create_jsons",
             mock_parse,
         )
         monkeypatch.setattr(
-            "src.player_match.views.collect_player_full_data_eesl",
+            "src.player_match.parser.collect_player_full_data_eesl",
             mock_collect_player,
         )
 
@@ -408,11 +408,11 @@ class TestPlayerMatchViewsMore:
             return None
 
         monkeypatch.setattr(
-            "src.player_match.views.parse_match_and_create_jsons",
+            "src.player_match.parser.parse_match_and_create_jsons",
             mock_parse,
         )
         monkeypatch.setattr(
-            "src.player_match.views.collect_player_full_data_eesl",
+            "src.player_match.parser.collect_player_full_data_eesl",
             mock_collect_player,
         )
 
