@@ -24,6 +24,8 @@ from src.tournaments.db_services import TournamentServiceDB
 logger = get_logger("helpers")
 fetch_data_logger = get_logger("fetch_data")
 
+_db_semaphore = asyncio.Semaphore(10)
+
 DEFAULT_QUICK_SCORE_DELTAS: list[int] = [6, 3, 2, 1, -1]
 DEFAULT_SCORE_FORM_GOAL_LABEL = "TD"
 DEFAULT_SCORE_FORM_GOAL_EMOJI = "🏈"
@@ -326,23 +328,24 @@ async def fetch_with_scoreboard_data(
     match_service_db = MatchServiceDB(_db)
 
     try:
-        (
-            scoreboard_data,
-            match,
-            match_teams_data,
-            match_data,
-            players,
-            events,
-            sport,
-        ) = await asyncio.gather(
-            match_service_db.get_scoreboard_by_match(match_id),
-            match_service_db.get_match_with_tournament_sponsor(match_id),
-            match_service_db.get_teams_by_match(match_id),
-            match_service_db.get_matchdata_by_match(match_id),
-            match_service_db.get_players_with_full_data_optimized(match_id),
-            _fetch_events_by_match(match_id, database=_db),
-            match_service_db.get_sport_by_match_id(match_id),
-        )
+        async with _db_semaphore:
+            (
+                scoreboard_data,
+                match,
+                match_teams_data,
+                match_data,
+                players,
+                events,
+                sport,
+            ) = await asyncio.gather(
+                match_service_db.get_scoreboard_by_match(match_id),
+                match_service_db.get_match_with_tournament_sponsor(match_id),
+                match_service_db.get_teams_by_match(match_id),
+                match_service_db.get_matchdata_by_match(match_id),
+                match_service_db.get_players_with_full_data_optimized(match_id),
+                _fetch_events_by_match(match_id, database=_db),
+                match_service_db.get_sport_by_match_id(match_id),
+            )
         fetch_data_logger.debug(f"Fetched scoreboard for match_id: {match_id}")
         fetch_data_logger.debug(f"Fetched match for match_id: {match_id}")
         fetch_data_logger.debug(f"Fetched match_data for match_id: {match_id}")
