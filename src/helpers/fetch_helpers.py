@@ -8,7 +8,13 @@ from sqlalchemy import select
 
 from src.core import db
 from src.core.enums import ClockDirection, ClockOnStopBehavior, InitialTimeMode, PeriodClockVariant
-from src.core.models import SponsorDB, SponsorSponsorLineDB, SportScoreboardPresetDB, TeamDB
+from src.core.models import (
+    MatchDataDB,
+    SponsorDB,
+    SponsorSponsorLineDB,
+    SportScoreboardPresetDB,
+    TeamDB,
+)
 from src.core.period_clock import calculate_effective_gameclock_max, extract_period_index
 from src.gameclocks.db_services import GameClockServiceDB
 from src.gameclocks.schemas import GameClockSchemaCreate
@@ -221,10 +227,7 @@ async def _fetch_sponsor_line_sponsors(sponsor_line_id: int | None, database=Non
 
 async def fetch_list_of_matches_data(matches: list[Any]) -> list[dict[str, Any]] | None:
     fetch_data_logger.debug("Fetching list of matches data")
-    from src.matches.db_services import MatchServiceDB
 
-    match_data_service_db = MatchDataServiceDB(db)
-    match_service_db = MatchServiceDB(db)
     all_match_data = []
 
     try:
@@ -243,32 +246,40 @@ async def fetch_list_of_matches_data(matches: list[Any]) -> list[dict[str, Any]]
             results = await session.execute(stmt)
             teams = {team.id: team for team in results.scalars().all()}
 
-        match_data_list = await asyncio.gather(
-            *[match_service_db.get_matchdata_by_match(match_id) for match_id in match_ids]
-        )
+            stmt = select(MatchDataDB).where(MatchDataDB.match_id.in_(match_ids))
+            results = await session.execute(stmt)
+            match_data_map = {md.match_id: md for md in results.scalars().all()}
 
-        for idx, match in enumerate(matches):
-            match_id = match.id
-            match_data = match_data_list[idx]
-            team_a = teams.get(match.team_a_id)
-            team_b = teams.get(match.team_b_id)
-
-            match_teams_data = {"team_a": team_a, "team_b": team_b}
-
-            if match_data is None:
+            missing_match_ids = [mid for mid in match_ids if mid not in match_data_map]
+            for match_id in missing_match_ids:
                 match_data_schema = MatchDataSchemaCreate(match_id=match_id)
-                match_data = await match_data_service_db.create(match_data_schema)
+                new_match_data = MatchDataDB(**match_data_schema.model_dump())
+                session.add(new_match_data)
+                match_data_map[match_id] = new_match_data
 
-            all_match_data.append(
-                {
-                    "match_id": match_id,
-                    "id": match_id,
-                    "status_code": status.HTTP_200_OK,
-                    "match": match,
-                    "teams_data": match_teams_data,
-                    "match_data": match_data.__dict__,
-                }
-            )
+            if missing_match_ids:
+                await session.flush()
+                for match_id in missing_match_ids:
+                    await session.refresh(match_data_map[match_id])
+
+            for match in matches:
+                match_id = match.id
+                match_data = match_data_map[match_id]
+                team_a = teams.get(match.team_a_id)
+                team_b = teams.get(match.team_b_id)
+
+                match_teams_data = {"team_a": team_a, "team_b": team_b}
+
+                all_match_data.append(
+                    {
+                        "match_id": match_id,
+                        "id": match_id,
+                        "status_code": status.HTTP_200_OK,
+                        "match": match,
+                        "teams_data": match_teams_data,
+                        "match_data": match_data.__dict__,
+                    }
+                )
 
         return all_match_data
     except Exception as e:
