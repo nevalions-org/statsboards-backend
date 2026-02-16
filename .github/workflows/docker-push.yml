@@ -43,3 +43,18 @@ jobs:
           ${{ secrets.DOCKERHUB_USERNAME }}/statsboards-backend:prod
         cache-from: type=registry,ref=${{ secrets.DOCKERHUB_USERNAME }}/statsboards-backend:buildcache
         cache-to: type=registry,ref=${{ secrets.DOCKERHUB_USERNAME }}/statsboards-backend:buildcache,mode=max
+
+    # Auto-rollout to dev K8s cluster (STAB-239, STAB-240)
+    - name: Install kubectl
+      run: |
+        curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+        chmod +x kubectl
+        sudo mv kubectl /usr/local/bin/
+        kubectl version --client
+
+    - name: Rollout Backend Deployment (dev)
+      run: |
+        echo "Restarting statsboards-backend deployment in stats-dev namespace..."
+        kubectl rollout restart deployment/statsboards-backend -n stats-dev
+        kubectl rollout status deployment/statsboards-backend -n stats-dev --timeout=180s
+        echo "Backend rollout complete!"
