@@ -1,5 +1,7 @@
 from fastapi import HTTPException
+from pydantic import BaseModel
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 from sqlalchemy.sql import func
 
@@ -51,10 +53,62 @@ class PlayerTeamTournamentServiceDB(BaseServiceDB):
         self.logger.debug(f"Starting to create PlayerTeamTournamentDB with data: {item.__dict__}")
         return await super().create(item)
 
-    @handle_service_exceptions(
-        item_name=ITEM, operation="creating or updating", return_value_on_not_found=None
-    )
     async def create_or_update_player_team_tournament(
+        self,
+        p: PlayerTeamTournamentSchemaCreate | PlayerTeamTournamentSchemaUpdate,
+        *,
+        session: AsyncSession | None = None,
+    ) -> PlayerTeamTournamentDB | None:
+        if session is not None:
+            return await self._create_or_update_player_team_tournament_with_session(p, session)
+        return await self._create_or_update_player_team_tournament_without_session(p)
+
+    async def _create_or_update_player_team_tournament_with_session(
+        self,
+        p: PlayerTeamTournamentSchemaCreate | PlayerTeamTournamentSchemaUpdate,
+        session: AsyncSession,
+    ) -> PlayerTeamTournamentDB | None:
+        self.logger.debug(f"Creat or update {ITEM} with session:{p}")
+        if p.player_team_tournament_eesl_id:
+            self.logger.debug(f"Get {ITEM} by eesl id")
+            player_team_tournament_from_db = await self.get_player_team_tournament_by_eesl_id(
+                p.player_team_tournament_eesl_id, session=session
+            )
+            if player_team_tournament_from_db:
+                self.logger.debug(f"{ITEM} exist, updating...")
+                return await self._update_player_team_tournament_with_session(
+                    player_team_tournament_from_db,
+                    PlayerTeamTournamentSchemaUpdate(**p.model_dump()),
+                    session,
+                )
+            else:
+                self.logger.debug(f"{ITEM} does not exist, creating...")
+                return await self._create_player_team_tournament_with_session(
+                    PlayerTeamTournamentSchemaCreate(**p.model_dump()),
+                    session,
+                )
+        else:
+            if p.tournament_id and p.player_id:
+                self.logger.debug(f"Got {ITEM} by player id and tournament id")
+                player_team_tournament_from_db = (
+                    await self._get_player_team_tournaments_by_tournament_id_with_session(
+                        p.tournament_id, p.player_id, session
+                    )
+                )
+                if player_team_tournament_from_db:
+                    self.logger.debug(f"{ITEM} exist, updating...")
+                    return await self._update_player_team_tournament_with_session(
+                        player_team_tournament_from_db,
+                        PlayerTeamTournamentSchemaUpdate(**p.model_dump()),
+                        session,
+                    )
+            self.logger.debug(f"{ITEM} does not exist, creating...")
+            return await self._create_player_team_tournament_with_session(
+                PlayerTeamTournamentSchemaCreate(**p.model_dump()),
+                session,
+            )
+
+    async def _create_or_update_player_team_tournament_without_session(
         self,
         p: PlayerTeamTournamentSchemaCreate | PlayerTeamTournamentSchemaUpdate,
     ) -> PlayerTeamTournamentDB | None:
@@ -94,6 +148,39 @@ class PlayerTeamTournamentServiceDB(BaseServiceDB):
                 PlayerTeamTournamentSchemaCreate(**p.model_dump()),
             )
 
+    async def _create_player_team_tournament_with_session(
+        self,
+        p: PlayerTeamTournamentSchemaCreate,
+        session: AsyncSession,
+    ) -> PlayerTeamTournamentDB:
+        if isinstance(p, BaseModel):
+            item_to_add = PlayerTeamTournamentDB(**p.model_dump())
+        else:
+            item_to_add = PlayerTeamTournamentDB(
+                **{k: v for k, v in p.__dict__.items() if not k.startswith("_")}
+            )
+        session.add(item_to_add)
+        await session.flush()
+        await session.refresh(item_to_add)
+        return item_to_add
+
+    async def _update_player_team_tournament_with_session(
+        self,
+        existing_item: PlayerTeamTournamentDB,
+        p: PlayerTeamTournamentSchemaUpdate,
+        session: AsyncSession,
+    ) -> PlayerTeamTournamentDB:
+        update_data = (
+            p.model_dump(exclude_unset=True, exclude_none=True)
+            if isinstance(p, BaseModel)
+            else {k: v for k, v in p.__dict__.items() if not k.startswith("_") and v is not None}
+        )
+        for key, value in update_data.items():
+            setattr(existing_item, key, value)
+        await session.flush()
+        await session.refresh(existing_item)
+        return existing_item
+
     @handle_service_exceptions(
         item_name=ITEM, operation="updating by eesl ID", return_value_on_not_found=None
     )
@@ -124,19 +211,36 @@ class PlayerTeamTournamentServiceDB(BaseServiceDB):
         self.logger.debug(f"Create {ITEM} wit data {p}")
         return await super().create(p)
 
-    @handle_service_exceptions(
-        item_name=ITEM, operation="fetching by eesl ID", return_value_on_not_found=None
-    )
     async def get_player_team_tournament_by_eesl_id(
         self,
         value: int | str,
         field_name: str = "player_team_tournament_eesl_id",
+        *,
+        session: AsyncSession | None = None,
     ) -> PlayerTeamTournamentDB | None:
+        if session is not None:
+            return await self._get_player_team_tournament_by_field_with_session(
+                value, field_name, session
+            )
         self.logger.debug(f"Get {ITEM} by {field_name}: {value}")
         return await self.get_item_by_field_value(
             value=value,
             field_name=field_name,
         )
+
+    async def _get_player_team_tournament_by_field_with_session(
+        self,
+        value: int | str,
+        field_name: str,
+        session: AsyncSession,
+    ) -> PlayerTeamTournamentDB | None:
+        self.logger.debug(f"Get {ITEM} by {field_name}: {value} with session")
+        result = await session.scalars(
+            select(PlayerTeamTournamentDB).where(
+                getattr(PlayerTeamTournamentDB, field_name) == value
+            )
+        )
+        return result.one_or_none()
 
     @handle_service_exceptions(
         item_name=ITEM,
@@ -148,18 +252,20 @@ class PlayerTeamTournamentServiceDB(BaseServiceDB):
     ) -> PlayerTeamTournamentDB | None:
         self.logger.debug(f"Get {ITEM} by tournament id:{tournament_id} and player id:{player_id}")
         async with self.db.get_session_maker()() as session:
-            stmt = (
-                select(PlayerTeamTournamentDB)
-                .where(PlayerTeamTournamentDB.tournament_id == tournament_id)
-                .where(PlayerTeamTournamentDB.player_id == player_id)
+            return await self._get_player_team_tournaments_by_tournament_id_with_session(
+                tournament_id, player_id, session
             )
 
-            results = await session.execute(stmt)
-            player = results.scalars().one_or_none()
-            if player:
-                return player
-            else:
-                return None
+    async def _get_player_team_tournaments_by_tournament_id_with_session(
+        self, tournament_id: int, player_id: int, session: AsyncSession
+    ) -> PlayerTeamTournamentDB | None:
+        stmt = (
+            select(PlayerTeamTournamentDB)
+            .where(PlayerTeamTournamentDB.tournament_id == tournament_id)
+            .where(PlayerTeamTournamentDB.player_id == player_id)
+        )
+        results = await session.execute(stmt)
+        return results.scalars().one_or_none()
 
     @handle_service_exceptions(
         item_name=ITEM, operation="fetching with person", return_value_on_not_found=None
