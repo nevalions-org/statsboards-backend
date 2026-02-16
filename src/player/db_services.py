@@ -1,6 +1,8 @@
 from typing import TYPE_CHECKING
 
+from pydantic import BaseModel
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 from sqlalchemy.sql import func
 
@@ -60,14 +62,71 @@ class PlayerServiceDB(BaseServiceDB):
     async def create_or_update_player(
         self,
         p: PlayerSchemaCreate | PlayerSchemaUpdate,
+        *,
+        session: AsyncSession | None = None,
     ) -> PlayerDB | None:
+        if session is not None:
+            return await self._create_or_update_player_with_session(p, session)
         return await super().create_or_update(p, eesl_field_name="player_eesl_id")
+
+    async def _create_or_update_player_with_session(
+        self,
+        p: PlayerSchemaCreate | PlayerSchemaUpdate,
+        session: AsyncSession,
+    ) -> PlayerDB:
+        field_name = "player_eesl_id"
+        field_value = getattr(p, field_name, None)
+
+        if field_value:
+            existing_item = await self._get_player_by_field_with_session(
+                field_value, field_name, session
+            )
+            if existing_item:
+                update_data = (
+                    p.model_dump(exclude_unset=True, exclude_none=True)
+                    if isinstance(p, BaseModel)
+                    else {
+                        k: v
+                        for k, v in p.__dict__.items()
+                        if not k.startswith("_") and v is not None
+                    }
+                )
+                for key, value in update_data.items():
+                    setattr(existing_item, key, value)
+                await session.flush()
+                await session.refresh(existing_item)
+                return existing_item
+
+        if isinstance(p, BaseModel):
+            item_to_add = PlayerDB(**p.model_dump())
+        else:
+            item_to_add = PlayerDB(**{k: v for k, v in p.__dict__.items() if not k.startswith("_")})
+        session.add(item_to_add)
+        await session.flush()
+        await session.refresh(item_to_add)
+        return item_to_add
+
+    async def _get_player_by_field_with_session(
+        self,
+        value: int | str,
+        field_name: str,
+        session: AsyncSession,
+    ) -> PlayerDB | None:
+        self.logger.debug(f"Get {ITEM} {field_name}:{value} with session")
+        result = await session.scalars(
+            select(PlayerDB).where(getattr(PlayerDB, field_name) == value)
+        )
+        return result.one_or_none()
 
     async def get_player_by_eesl_id(
         self,
         value: int | str,
         field_name: str = "player_eesl_id",
+        *,
+        session: AsyncSession | None = None,
     ) -> PlayerDB | None:
+        if session is not None:
+            return await self._get_player_by_field_with_session(value, field_name, session)
         self.logger.debug(f"Get {ITEM} {field_name}:{value}")
         return await self.get_item_by_field_value(
             value=value,
