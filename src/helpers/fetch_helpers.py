@@ -236,7 +236,7 @@ async def fetch_list_of_matches_data(matches: list[Any]) -> list[dict[str, Any]]
             team_ids.add(match.team_a_id)
             team_ids.add(match.team_b_id)
 
-        async with db.async_session() as session:
+        async with db.get_session_maker()() as session:
             stmt = select(TeamDB).where(TeamDB.id.in_(list(team_ids)))
             results = await session.execute(stmt)
             teams = {team.id: team for team in results.scalars().all()}

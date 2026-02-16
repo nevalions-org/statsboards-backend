@@ -81,7 +81,7 @@ class MatchParser:
                     team_eesl_ids.add(m["team_a_eesl_id"])
                     team_eesl_ids.add(m["team_b_eesl_id"])
 
-                async with db.async_session() as session:
+                async with db.get_session_maker()() as session:
                     stmt = select(TeamDB).where(TeamDB.team_eesl_id.in_(list(team_eesl_ids)))
                     results = await session.execute(stmt)
                     teams_by_eesl_id = {team.team_eesl_id: team for team in results.scalars().all()}
@@ -228,7 +228,7 @@ class MatchParser:
             team_a_eesl_id = match_data.get("team_a_eesl_id")
             team_b_eesl_id = match_data.get("team_b_eesl_id")
 
-            async with db.async_session() as session:
+            async with db.get_session_maker()() as session:
                 stmt = select(TeamDB).where(
                     TeamDB.team_eesl_id.in_([team_a_eesl_id, team_b_eesl_id])
                 )
