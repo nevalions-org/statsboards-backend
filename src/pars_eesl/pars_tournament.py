@@ -4,6 +4,7 @@ from typing import TypedDict
 
 from bs4 import BeautifulSoup
 
+from src.core.enums import RussianMonth
 from src.helpers import get_url
 from src.helpers.file_service import file_service
 from src.helpers.text_helpers import months, safe_int_conversion
@@ -417,20 +418,27 @@ def _parse_match_date(date_texts, item):
     logger.debug(f"{ITEM_GOT_MATCH} date_formatted:{date_formatted}")
 
     try:
-        logger.debug(f"Split date_formatted:{date_formatted.split()}")
-        date, month, day, time = date_formatted.split()
-        logger.debug(f"{ITEM_GOT_MATCH} date:{date}, month:{month}, day:{day}, time:{time}")
-    except Exception as ex:
-        logger.error(f"Error splitting date_formatted:{date_formatted} {ex}")
-        date = 1
-        month = "января"
-        time = "12:00"
+        pattern = r"(\d{1,2})\s+([а-яё]+)\s+(\d{4})?\s*([а-яё]+)?\s+(\d{1,2}:\d{2})"
+        match_result = re.search(pattern, date_formatted, re.IGNORECASE)
 
-    month = months[month]
-    date_ = datetime.strptime(f"{date} {month} {time}", "%d %B %H:%M")
-    YEAR = 2025
-    date_ = date_.replace(year=YEAR)
-    date_.strftime("%Y-%m-%d %H:%M:%S.%f")
+        if not match_result:
+            raise ValueError(f"Could not parse date: {date_formatted}")
+
+        day = match_result.group(1)
+        month_ru = match_result.group(2)
+        year = match_result.group(3)
+        time = match_result.group(5)
+
+        logger.debug(f"{ITEM_GOT_MATCH} day:{day}, month:{month_ru}, year:{year}, time:{time}")
+
+        month = months[RussianMonth(value=month_ru.lower())]
+        date_ = datetime.strptime(f"{day} {month} {time}", "%d %B %H:%M")
+
+        if year:
+            date_ = date_.replace(year=int(year))
+    except Exception as ex:
+        logger.error(f"Error parsing date_formatted:{date_formatted} {ex}")
+        date_ = datetime(2025, 1, 1, 12, 0)
 
     return date_
 
