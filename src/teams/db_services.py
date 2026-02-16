@@ -1,4 +1,5 @@
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
 from sqlalchemy.sql import func
 
@@ -44,6 +45,8 @@ class TeamServiceDB(BaseServiceDB):
     async def create_or_update_team(
         self,
         t: TeamSchemaCreate | TeamSchemaUpdate,
+        *,
+        session: AsyncSession | None = None,
     ) -> TeamDB:
         return await super().create_or_update(t, eesl_field_name="team_eesl_id")
 
@@ -51,12 +54,26 @@ class TeamServiceDB(BaseServiceDB):
         self,
         value: int | str,
         field_name: str = "team_eesl_id",
+        *,
+        session: AsyncSession | None = None,
     ) -> TeamDB | None:
+        if session is not None:
+            return await self._get_team_by_field_with_session(value, field_name, session)
         self.logger.debug(f"Get {ITEM} {field_name}:{value}")
         return await self.get_item_by_field_value(
             value=value,
             field_name=field_name,
         )
+
+    async def _get_team_by_field_with_session(
+        self,
+        value: int | str,
+        field_name: str,
+        session: AsyncSession,
+    ) -> TeamDB | None:
+        self.logger.debug(f"Get {ITEM} {field_name}:{value} with session")
+        result = await session.scalars(select(TeamDB).where(getattr(TeamDB, field_name) == value))
+        return result.one_or_none()
 
     @handle_service_exceptions(
         item_name=ITEM,

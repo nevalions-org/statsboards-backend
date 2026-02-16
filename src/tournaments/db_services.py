@@ -60,6 +60,8 @@ class TournamentServiceDB(BaseServiceDB):
     async def create_or_update_tournament(
         self,
         t: TournamentSchemaCreate | TournamentSchemaUpdate,
+        *,
+        session: AsyncSession | None = None,
     ) -> TournamentDB:
         return await super().create_or_update(t, eesl_field_name="tournament_eesl_id")
 
@@ -67,12 +69,28 @@ class TournamentServiceDB(BaseServiceDB):
         self,
         value: int | str,
         field_name: str = "tournament_eesl_id",
+        *,
+        session: AsyncSession | None = None,
     ) -> TournamentDB | None:
+        if session is not None:
+            return await self._get_tournament_by_field_with_session(value, field_name, session)
         self.logger.debug(f"Get {ITEM} {field_name}:{value}")
         return await self.get_item_by_field_value(
             value=value,
             field_name=field_name,
         )
+
+    async def _get_tournament_by_field_with_session(
+        self,
+        value: int | str,
+        field_name: str,
+        session: AsyncSession,
+    ) -> TournamentDB | None:
+        self.logger.debug(f"Get {ITEM} {field_name}:{value} with session")
+        result = await session.scalars(
+            select(TournamentDB).where(getattr(TournamentDB, field_name) == value)
+        )
+        return result.one_or_none()
 
     @handle_service_exceptions(
         item_name=ITEM,

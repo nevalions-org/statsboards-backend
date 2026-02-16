@@ -1,4 +1,5 @@
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.decorators import handle_service_exceptions
 from src.core.exceptions import NotFoundError
@@ -33,18 +34,20 @@ class PlayerMatchServiceDB(ServiceRegistryAccessorMixin, BaseServiceDB):
     async def create_or_update_player_match(
         self,
         p: PlayerMatchSchemaCreate | PlayerMatchSchemaUpdate,
+        *,
+        session: AsyncSession | None = None,
     ) -> PlayerMatchDB | None:
         self.logger.debug(f"Creat or update {ITEM}:{p}")
         if p.player_match_eesl_id and p.match_id:
             self.logger.debug(f"Get {ITEM} by eesl id")
             player_match_from_db = await self.get_player_match_by_match_id_and_eesl_id(
-                p.match_id, p.player_match_eesl_id
+                p.match_id, p.player_match_eesl_id, session=session
             )
             if player_match_from_db and p.match_id == player_match_from_db.match_id:
                 if not player_match_from_db.is_start:
                     self.logger.debug(f"{ITEM} exist, updating...")
                     return await self.update_player_match_by_eesl(
-                        p.match_id, p.player_match_eesl_id, p
+                        p.match_id, p.player_match_eesl_id, p, session=session
                     )
                 else:
                     self.logger.warning(f"{ITEM} is in start, skipping...")
@@ -79,31 +82,56 @@ class PlayerMatchServiceDB(ServiceRegistryAccessorMixin, BaseServiceDB):
         item_name=ITEM, operation="fetching by match and eesl id", return_value_on_not_found=None
     )
     async def get_player_match_by_match_id_and_eesl_id(
-        self, match_id: int, player_match_eesl_id: int | str
+        self,
+        match_id: int,
+        player_match_eesl_id: int | str,
+        *,
+        session: AsyncSession | None = None,
     ) -> PlayerMatchDB | None:
         self.logger.debug(f"Get {ITEM} by match id:{match_id} and eesl id:{player_match_eesl_id}")
-        async with self.db.get_session_maker()() as session:
-            stmt = (
-                select(PlayerMatchDB)
-                .where(PlayerMatchDB.match_id == match_id)
-                .where(PlayerMatchDB.player_match_eesl_id == player_match_eesl_id)
+        if session is not None:
+            return await self._get_player_match_by_match_id_and_eesl_id_with_session(
+                match_id, player_match_eesl_id, session
+            )
+        async with self.db.get_session_maker()() as new_session:
+            return await self._get_player_match_by_match_id_and_eesl_id_with_session(
+                match_id, player_match_eesl_id, new_session
             )
 
-            result = await session.execute(stmt)
-            player = result.scalars().one_or_none()
-            if player:
-                self.logger.debug(f"{ITEM} found {player}")
-                return player
-            else:
-                raise NotFoundError(f"{ITEM} not found")
+    async def _get_player_match_by_match_id_and_eesl_id_with_session(
+        self,
+        match_id: int,
+        player_match_eesl_id: int | str,
+        session: AsyncSession,
+    ) -> PlayerMatchDB | None:
+        stmt = (
+            select(PlayerMatchDB)
+            .where(PlayerMatchDB.match_id == match_id)
+            .where(PlayerMatchDB.player_match_eesl_id == player_match_eesl_id)
+        )
+
+        result = await session.execute(stmt)
+        player = result.scalars().one_or_none()
+        if player:
+            self.logger.debug(f"{ITEM} found {player}")
+            return player
+        else:
+            raise NotFoundError(f"{ITEM} not found")
 
     @handle_service_exceptions(
         item_name=ITEM, operation="updating by eesl", return_value_on_not_found=None
     )
     async def update_player_match_by_eesl(
-        self, match_id: int, eesl_id: int | str, new_player: PlayerMatchSchemaUpdate
+        self,
+        match_id: int,
+        eesl_id: int | str,
+        new_player: PlayerMatchSchemaUpdate,
+        *,
+        session: AsyncSession | None = None,
     ) -> PlayerMatchDB | None:
-        player = await self.get_player_match_by_match_id_and_eesl_id(match_id, eesl_id)
+        player = await self.get_player_match_by_match_id_and_eesl_id(
+            match_id, eesl_id, session=session
+        )
         if player:
             updated_player = await self.update(player.id, new_player)
             if updated_player:

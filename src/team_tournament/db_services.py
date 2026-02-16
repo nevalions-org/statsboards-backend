@@ -1,4 +1,5 @@
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.decorators import handle_service_exceptions
 from src.core.exceptions import NotFoundError
@@ -21,11 +22,12 @@ class TeamTournamentServiceDB(BaseServiceDB):
     async def create(
         self,
         item: TeamTournamentSchemaCreate,
+        *,
+        session: AsyncSession | None = None,
     ) -> TeamTournamentDB:
         self.logger.debug(f"Creat {ITEM} relation:{item}")
         is_relation_exist = await self.get_team_tournament_relation(
-            item.team_id,
-            item.tournament_id,
+            item.team_id, item.tournament_id, session=session
         )
         if is_relation_exist:
             return is_relation_exist
@@ -35,18 +37,36 @@ class TeamTournamentServiceDB(BaseServiceDB):
         item_name=ITEM, operation="fetching relation", return_value_on_not_found=None
     )
     async def get_team_tournament_relation(
-        self, team_id: int, tournament_id: int
+        self,
+        team_id: int,
+        tournament_id: int,
+        *,
+        session: AsyncSession | None = None,
     ) -> TeamTournamentDB | None:
         self.logger.debug(f"Get {ITEM} relation: team_id:{team_id} tournament_id:{tournament_id}")
-        async with self.db.get_session_maker()() as session:
-            result = await session.execute(
-                select(TeamTournamentDB).where(
-                    (TeamTournamentDB.team_id == team_id)
-                    & (TeamTournamentDB.tournament_id == tournament_id)
-                )
+        if session is not None:
+            return await self._get_team_tournament_relation_with_session(
+                team_id, tournament_id, session
             )
-            team_tournament = result.scalars().one_or_none()
-            return team_tournament
+        async with self.db.get_session_maker()() as new_session:
+            return await self._get_team_tournament_relation_with_session(
+                team_id, tournament_id, new_session
+            )
+
+    async def _get_team_tournament_relation_with_session(
+        self,
+        team_id: int,
+        tournament_id: int,
+        session: AsyncSession,
+    ) -> TeamTournamentDB | None:
+        result = await session.execute(
+            select(TeamTournamentDB).where(
+                (TeamTournamentDB.team_id == team_id)
+                & (TeamTournamentDB.tournament_id == tournament_id)
+            )
+        )
+        team_tournament = result.scalars().one_or_none()
+        return team_tournament
 
     @handle_service_exceptions(
         item_name=ITEM, operation="fetching related teams", return_value_on_not_found=[]
