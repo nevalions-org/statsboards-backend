@@ -1,3 +1,4 @@
+import os
 from typing import Any, Callable
 
 from fastapi import HTTPException
@@ -27,6 +28,14 @@ from src.logging_config import get_logger
 
 db_logger_helper = get_logger("db")
 
+# Default pool settings - can be overridden via environment variables
+# Production defaults: 8 base + 12 overflow = 20 max per pod
+# Test defaults: 3 base + 5 overflow = 8 max
+DEFAULT_POOL_SIZE = 8
+DEFAULT_MAX_OVERFLOW = 12
+DEFAULT_TEST_POOL_SIZE = 3
+DEFAULT_TEST_MAX_OVERFLOW = 5
+
 
 class Database:
     def __init__(self, db_url: str, echo: bool = False, test_mode: bool = False):
@@ -36,8 +45,22 @@ class Database:
         self.test_async_session: Any | None = None
 
         try:
-            pool_size = 3 if "test" in db_url else 5
-            max_overflow = 5 if "test" in db_url else 10
+            is_test = "test" in db_url
+            pool_size = int(
+                os.getenv(
+                    "DB_POOL_SIZE",
+                    str(DEFAULT_TEST_POOL_SIZE if is_test else DEFAULT_POOL_SIZE),
+                )
+            )
+            max_overflow = int(
+                os.getenv(
+                    "DB_POOL_MAX_OVERFLOW",
+                    str(DEFAULT_TEST_MAX_OVERFLOW if is_test else DEFAULT_MAX_OVERFLOW),
+                )
+            )
+            self.logger.info(
+                f"Connection pool settings: pool_size={pool_size}, max_overflow={max_overflow}"
+            )
             self.engine: AsyncEngine = create_async_engine(
                 url=db_url,
                 echo=echo,
