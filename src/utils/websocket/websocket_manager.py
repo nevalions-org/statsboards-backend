@@ -30,6 +30,7 @@ class MatchDataWebSocketManager:
         self._cache_service = None
         self._connection_lock = asyncio.Lock()
         self._listeners: dict[str, Callable] = {}
+        self._is_degraded = False
 
     async def maintain_connection(self):
         while True:
@@ -37,11 +38,29 @@ class MatchDataWebSocketManager:
                 if not self.is_connected:
                     if self.use_redis:
                         await self.connect_to_redis()
+                        if self._redis_notifier and (
+                            not self._redis_listen_task or self._redis_listen_task.done()
+                        ):
+                            self._redis_listen_task = asyncio.create_task(
+                                self._redis_notifier.listen_loop()
+                            )
+                            self.logger.info("Redis listen loop restarted")
+                        if self._is_degraded:
+                            self.logger.info(
+                                "Redis connection restored - realtime features recovered"
+                            )
+                            self._is_degraded = False
                     else:
                         await self.connect_to_db()
                 await asyncio.sleep(5)
             except Exception as e:
-                self.logger.error(f"Connection maintenance error: {str(e)}", exc_info=True)
+                if self.use_redis and not self._is_degraded:
+                    self.logger.warning(
+                        f"Redis connection maintenance error: {str(e)}. Realtime features degraded."
+                    )
+                    self._is_degraded = True
+                else:
+                    self.logger.error(f"Connection maintenance error: {str(e)}", exc_info=True)
                 self.is_connected = False
                 await asyncio.sleep(5)
 
@@ -167,6 +186,7 @@ class MatchDataWebSocketManager:
                 self.logger.debug("WebSocket manager already started, skipping duplicate startup")
                 return
 
+        connection_succeeded = False
         try:
             if self.use_redis:
                 await self.connect_to_redis()
@@ -175,19 +195,34 @@ class MatchDataWebSocketManager:
                         self._redis_notifier.listen_loop()
                     )
                     self.logger.info("Redis listen loop started")
+                connection_succeeded = True
             else:
                 await self.connect_to_db()
+                connection_succeeded = True
+        except Exception as e:
+            if self.use_redis:
+                self.logger.warning(
+                    f"Redis connection failed during startup: {str(e)}. "
+                    "Realtime features degraded - backend will continue serving HTTP/API endpoints. "
+                    "Background reconnection attempts will continue."
+                )
+                self._is_degraded = True
+            else:
+                self.logger.error(f"Startup error: {str(e)}", exc_info=True)
+                raise
 
-            if not self._connection_retry_task or self._connection_retry_task.done():
-                self._connection_retry_task = asyncio.create_task(self.maintain_connection())
+        if not self._connection_retry_task or self._connection_retry_task.done():
+            self._connection_retry_task = asyncio.create_task(self.maintain_connection())
+            if connection_succeeded:
                 self.logger.info("WebSocket manager startup complete")
             else:
-                self.logger.debug(
-                    "Connection retry task already exists, skipping duplicate task creation"
+                self.logger.info(
+                    "WebSocket manager started in degraded mode - realtime features unavailable"
                 )
-        except Exception as e:
-            self.logger.error(f"Startup error: {str(e)}", exc_info=True)
-            raise
+        else:
+            self.logger.debug(
+                "Connection retry task already exists, skipping duplicate task creation"
+            )
 
     async def _base_listener(
         self, connection, pid, channel, payload, update_type, invalidate_func=None

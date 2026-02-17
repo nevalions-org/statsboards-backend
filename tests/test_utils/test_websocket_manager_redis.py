@@ -137,3 +137,65 @@ class TestWebSocketManagerRedisMode:
         for channel in expected_channels:
             assert channel in listener_map
             assert callable(listener_map[channel])
+
+    @pytest.mark.asyncio
+    async def test_startup_resilient_when_redis_unavailable(self):
+        """Test startup continues when Redis connection fails in degraded mode."""
+        manager = MatchDataWebSocketManager(
+            db_url="postgresql://test:test@localhost/test",
+            use_redis=True,
+            redis_url="redis://localhost:6379",
+        )
+
+        with patch(
+            "src.utils.redis_notifier.init_redis_notifier",
+            side_effect=ConnectionError("Redis unavailable"),
+        ):
+            await manager.startup()
+
+            assert manager.is_connected is False
+            assert manager._is_degraded is True
+            assert manager._connection_retry_task is not None
+
+            await manager.shutdown()
+
+    @pytest.mark.asyncio
+    async def test_shutdown_safe_when_partially_initialized(self):
+        """Test shutdown handles partially initialized state safely."""
+        manager = MatchDataWebSocketManager(
+            db_url="postgresql://test:test@localhost/test",
+            use_redis=True,
+            redis_url="redis://localhost:6379",
+        )
+
+        manager._is_degraded = True
+        manager.is_connected = False
+
+        await manager.shutdown()
+
+        assert manager._redis_notifier is None
+        assert manager._redis_listen_task is None
+
+    @pytest.mark.asyncio
+    async def test_maintain_connection_recovers_from_degraded_state(self):
+        """Test maintain_connection clears degraded flag on reconnection."""
+        manager = MatchDataWebSocketManager(
+            db_url="postgresql://test:test@localhost/test",
+            use_redis=True,
+            redis_url="redis://localhost:6379",
+        )
+
+        manager._is_degraded = True
+        manager.is_connected = False
+
+        mock_notifier = MagicMock()
+        mock_notifier.subscribe = AsyncMock()
+        mock_notifier.register_callback = MagicMock()
+        mock_notifier.listen_loop = AsyncMock()
+
+        with patch("src.utils.redis_notifier.init_redis_notifier", return_value=mock_notifier):
+            await manager.connect_to_redis()
+
+            assert manager.is_connected is True
+
+            await manager.shutdown()
