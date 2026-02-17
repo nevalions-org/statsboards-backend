@@ -306,8 +306,12 @@ async def _fetch_sponsor_line_sponsors(sponsor_line_id: int | None, database=Non
         return sorted(sponsors, key=lambda x: x["position"] or 0)
 
 
-async def fetch_list_of_matches_data(matches: list[Any]) -> list[dict[str, Any]] | None:
+async def fetch_list_of_matches_data(
+    matches: list[Any], database: Database | None = None
+) -> list[dict[str, Any]] | None:
     fetch_data_logger.debug("Fetching list of matches data")
+
+    _db = database or db
 
     all_match_data = []
 
@@ -322,7 +326,7 @@ async def fetch_list_of_matches_data(matches: list[Any]) -> list[dict[str, Any]]
             team_ids.add(match.team_a_id)
             team_ids.add(match.team_b_id)
 
-        async with db.get_session_maker()() as session:
+        async with _db.get_session_maker()() as session:
             stmt = select(TeamDB).where(TeamDB.id.in_(list(team_ids)))
             results = await session.execute(stmt)
             teams = {team.id: team for team in results.scalars().all()}

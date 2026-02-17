@@ -338,7 +338,7 @@ class MatchCRUDRouter(
             from src.helpers.fetch_helpers import fetch_list_of_matches_data
 
             self.logger.debug("Get all match data by match endpoint")
-            return await fetch_list_of_matches_data(all_matches)
+            return await fetch_list_of_matches_data(all_matches, database=self.loaded_service.db)
 
         @router.get(
             "/id/{match_id}/data/",
