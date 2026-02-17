@@ -539,6 +539,7 @@ class TestMatchViews:
 
     async def test_create_parsed_single_match_endpoint_teams_not_found(self, client, test_db):
         from unittest.mock import AsyncMock, patch
+
         from src.sports.db_services import SportServiceDB
         from src.teams.db_services import TeamServiceDB
 
@@ -546,14 +547,14 @@ class TestMatchViews:
         sport = await sport_service.create(SportFactorySample.build())
 
         team_service = TeamServiceDB(test_db)
-        team_a = await team_service.create_or_update_team(
+        await team_service.create_or_update_team(
             TeamFactory.build(sport_id=sport.id, team_eesl_id=100)
         )
-        team_b = await team_service.create_or_update_team(
+        await team_service.create_or_update_team(
             TeamFactory.build(sport_id=sport.id, team_eesl_id=200)
         )
 
-        mock_match_data = {
+        {
             "team_a": "Team A",
             "team_b": "Team B",
             "team_a_eesl_id": 300,

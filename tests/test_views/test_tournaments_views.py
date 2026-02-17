@@ -1,8 +1,8 @@
 from io import BytesIO
+from unittest.mock import Mock, patch
 
 import pytest
 from PIL import Image
-from unittest.mock import Mock, patch
 
 from src.person.db_services import PersonServiceDB
 from src.person.schemas import PersonSchemaCreate as PersonSchemaCreateType

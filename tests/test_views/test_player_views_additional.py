@@ -149,10 +149,10 @@ class TestPlayerViewsAdditional:
         person2 = await person_service.create_or_update_person(PersonFactory.build())
 
         player_service = PlayerServiceDB(test_db)
-        player1 = await player_service.create_or_update_player(
+        await player_service.create_or_update_player(
             PlayerSchemaCreate(sport_id=sport.id, person_id=person1.id, team_id=team1.id)
         )
-        player2 = await player_service.create_or_update_player(
+        await player_service.create_or_update_player(
             PlayerSchemaCreate(sport_id=sport.id, person_id=person2.id, team_id=team2.id)
         )
 

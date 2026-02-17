@@ -305,7 +305,7 @@ class TestMatchCRUDRouter:
                 person_id=person.id,
             )
         )
-        ptt = await player_team_tournament_service.create(
+        await player_team_tournament_service.create(
             PlayerTeamTournamentSchemaCreate(
                 player_id=player.id,
                 team_id=team_a.id,

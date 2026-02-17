@@ -8,7 +8,13 @@ from fastapi import status
 from sqlalchemy import select
 
 from src.core import db
-from src.core.enums import ClockDirection, ClockOnStopBehavior, InitialTimeMode, PeriodClockVariant
+from src.core.enums import (
+    ClockDirection,
+    ClockOnStopBehavior,
+    InitialTimeMode,
+    PeriodClockVariant,
+    SportPeriodMode,
+)
 from src.core.models import (
     MatchDataDB,
     SponsorDB,
@@ -124,35 +130,55 @@ def _get_preset_values_for_gameclock(
     period_index: int = 1,
 ) -> dict[str, Any]:
     """Extract preset values for gameclock creation."""
+    period_clock_variant_value = getattr(
+        preset, "period_clock_variant", PeriodClockVariant.PER_PERIOD
+    )
+    if isinstance(period_clock_variant_value, str):
+        period_clock_variant_value = PeriodClockVariant(period_clock_variant_value)
+
     effective_max = calculate_effective_gameclock_max(
         base_max=preset.gameclock_max,
-        variant=getattr(
-            preset,
-            "period_clock_variant",
-            PeriodClockVariant.PER_PERIOD,
-        ),
+        variant=period_clock_variant_value,
         period_index=period_index,
     )
+
+    initial_time_mode_value = preset.initial_time_mode
+    if isinstance(initial_time_mode_value, str):
+        initial_time_mode_value = InitialTimeMode(initial_time_mode_value)
+
     initial_gameclock_seconds = _calculate_initial_gameclock_seconds(
         gameclock_max=effective_max,
-        initial_time_mode=preset.initial_time_mode,
+        initial_time_mode=initial_time_mode_value,
         initial_time_min_seconds=preset.initial_time_min_seconds,
     )
+
+    direction_value = preset.direction
+    if isinstance(direction_value, str):
+        direction_value = ClockDirection(direction_value)
+
+    on_stop_behavior_value = preset.on_stop_behavior
+    if isinstance(on_stop_behavior_value, str):
+        on_stop_behavior_value = ClockOnStopBehavior(on_stop_behavior_value)
+
     return {
         "gameclock": initial_gameclock_seconds,
         "gameclock_time_remaining": initial_gameclock_seconds,
         "gameclock_max": effective_max,
-        "direction": preset.direction,
-        "on_stop_behavior": preset.on_stop_behavior,
+        "direction": direction_value,
+        "on_stop_behavior": on_stop_behavior_value,
         "use_sport_preset": True,
     }
 
 
 def _get_preset_values_for_scoreboard(preset: SportScoreboardPresetDB) -> dict[str, Any]:
     """Extract preset values for scoreboard creation."""
+    period_mode_value = preset.period_mode
+    if isinstance(period_mode_value, str):
+        period_mode_value = SportPeriodMode(period_mode_value)
+
     values: dict[str, Any] = {
         "is_qtr": preset.is_qtr,
-        "period_mode": preset.period_mode,
+        "period_mode": period_mode_value,
         "period_count": preset.period_count,
         "period_labels_json": preset.period_labels_json,
         "is_time": preset.is_time,
@@ -186,7 +212,7 @@ def _get_default_scoreboard_values() -> dict[str, Any]:
     """Get default scoreboard values when no sport preset is available."""
     return {
         "is_qtr": True,
-        "period_mode": "qtr",
+        "period_mode": SportPeriodMode.QTR,
         "period_count": 4,
         "period_labels_json": None,
         "is_time": True,

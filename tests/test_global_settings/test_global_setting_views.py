@@ -14,7 +14,7 @@ async def admin_user(test_db):
     """Create a test admin user."""
     from src.users.db_services import UserServiceDB
 
-    service = UserServiceDB(test_db)
+    UserServiceDB(test_db)
 
     async with test_db.get_session_maker()() as db_session:
         role = RoleDB(name="admin", description="Admin role")

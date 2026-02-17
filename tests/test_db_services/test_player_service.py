@@ -317,7 +317,7 @@ class TestPlayerServiceDBSearchWithPaginationDetails:
         created_sport = await sport_service.create(sport)
 
         person_service = PersonServiceDB(test_db)
-        created_person1 = await person_service.create_or_update_person(person)
+        await person_service.create_or_update_person(person)
 
         player_service = PlayerServiceDB(test_db)
         for i in range(5):
@@ -479,7 +479,7 @@ class TestPlayerServiceDBGetPlayerCareer:
 
         team_service = TeamServiceDB(test_db)
         team = TeamFactoryWithRelations.build(sport=created_sport)
-        created_team = await team_service.create(team)
+        await team_service.create(team)
 
         season_service = SeasonServiceDB(test_db)
         season = SeasonFactoryAny.build()

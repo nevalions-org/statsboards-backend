@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Annotated, Literal, TypeAlias
 
 from fastapi import Path
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, field_validator
 
 from src.core.enums import SportPeriodMode
 from src.core.schema_helpers import make_fields_optional
@@ -68,6 +68,13 @@ class ScoreboardSchemaBase(BaseModel):
     language_code: ScoreboardLanguageCode | None = "en"
 
     match_id: int | None = None
+
+    @field_validator("period_mode", mode="before")
+    @classmethod
+    def parse_period_mode(cls, v):
+        if isinstance(v, str):
+            return SportPeriodMode(v)
+        return v
 
 
 ScoreboardSchemaUpdate = make_fields_optional(ScoreboardSchemaBase)

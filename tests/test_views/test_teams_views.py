@@ -210,7 +210,7 @@ class TestTeamViews:
         tournament_data = TournamentFactory.build(sport_id=sport.id, season_id=season.id)
         tournament = await tournament_service.create(tournament_data)
 
-        team_service = TeamServiceDB(test_db)
+        TeamServiceDB(test_db)
         team_data = TeamFactory.build(sport_id=sport.id, title="New Team")
 
         response = await client.post(

@@ -409,9 +409,9 @@ class MatchCRUDRouter(
             teams_service = self.service_registry.get("team")
             tournament_service = self.service_registry.get("tournament")
             sponsor_service = self.service_registry.get("sponsor")
-            match_db_service = self.service_registry.get("matchdata")
-            playclock_service = self.service_registry.get("playclock")
-            gameclock_service = self.service_registry.get("gameclock")
+            _ = self.service_registry.get("matchdata")
+            _ = self.service_registry.get("playclock")
+            _ = self.service_registry.get("gameclock")
             scoreboard_db_service = self.service_registry.get("scoreboard")
 
             try:
@@ -419,9 +419,9 @@ class MatchCRUDRouter(
                 new_match = await self.loaded_service.create_or_update_match(data)
 
                 self.logger.debug("Creating default matchdata, playclock and gameclock")
-                default_match_data = MatchDataSchemaCreate(match_id=new_match.id)
-                default_playclock = PlayClockSchemaCreate(match_id=new_match.id)
-                default_gameclock = GameClockSchemaCreate(match_id=new_match.id)
+                MatchDataSchemaCreate(match_id=new_match.id)
+                PlayClockSchemaCreate(match_id=new_match.id)
+                GameClockSchemaCreate(match_id=new_match.id)
 
                 self.logger.debug("Get tournament and tournament main sponsor")
                 tournament = await tournament_service.get_by_id(new_match.tournament_id)
@@ -465,9 +465,7 @@ class MatchCRUDRouter(
                         team_a_game_title=team_a.title.title(),
                         team_b_game_title=team_b.title.title(),
                     )
-                new_scoreboard = await scoreboard_db_service.create_or_update_scoreboard(
-                    scoreboard_schema
-                )
+                await scoreboard_db_service.create_or_update_scoreboard(scoreboard_schema)
                 self.logger.debug("Scoreboard created or updated")
                 self.logger.info(
                     f"Created match with full data and scoreboard {MatchSchema.model_validate(new_match)}"

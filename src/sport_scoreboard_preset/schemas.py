@@ -4,7 +4,7 @@ import re
 from typing import Annotated
 
 from fastapi import Path
-from pydantic import BaseModel, ConfigDict, model_validator
+from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 
 from src.core.enums import (
     ClockDirection,
@@ -51,6 +51,31 @@ class SportScoreboardPresetSchemaBase(BaseModel):
     score_form_goal_label: Annotated[str, Path(max_length=32)] = DEFAULT_SCORE_FORM_GOAL_LABEL
     score_form_goal_emoji: Annotated[str, Path(max_length=32)] = DEFAULT_SCORE_FORM_GOAL_EMOJI
     scoreboard_goal_text: Annotated[str, Path(max_length=64)] = DEFAULT_SCOREBOARD_GOAL_TEXT
+
+    @field_validator(
+        "direction",
+        "on_stop_behavior",
+        "initial_time_mode",
+        "period_clock_variant",
+        "period_mode",
+        mode="before",
+    )
+    @classmethod
+    def parse_enum_from_str(cls, v, info):
+        if not isinstance(v, str):
+            return v
+        field_name = info.field_name
+        enum_map = {
+            "direction": ClockDirection,
+            "on_stop_behavior": ClockOnStopBehavior,
+            "initial_time_mode": InitialTimeMode,
+            "period_clock_variant": PeriodClockVariant,
+            "period_mode": SportPeriodMode,
+        }
+        enum_cls = enum_map.get(field_name)
+        if enum_cls:
+            return enum_cls(v)
+        return v
 
     @model_validator(mode="after")
     def validate_period_labels(self) -> SportScoreboardPresetSchemaBase:

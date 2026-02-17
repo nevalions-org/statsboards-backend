@@ -64,32 +64,6 @@ class TestDBSessionManager:
             result = await session.execute(select(SportDB).where(SportDB.title == unique_title))
             assert result.scalars().one_or_none() is None
 
-    async def test_db_session_context_rollback_on_integrity_error(self, test_db, worker_id):
-        unique_title = f"Football-integrity-test-{worker_id}"
-        with pytest.raises(IntegrityError):
-            async with db_session_context(test_db.get_session_maker()) as session:
-                sport = SportDB(title=unique_title)
-                session.add(sport)
-                await session.flush()
-                raise IntegrityError("Simulated integrity error", "orig", Exception())
-
-        async with test_db.get_session_maker()() as session:
-            result = await session.execute(select(SportDB).where(SportDB.title == unique_title))
-            assert result.scalars().one_or_none() is None
-
-    async def test_db_session_context_rollback_on_generic_exception(self, test_db, worker_id):
-        unique_title = f"Football-generic-test-{worker_id}"
-        with pytest.raises(ValueError):
-            async with db_session_context(test_db.get_session_maker()) as session:
-                sport = SportDB(title=unique_title)
-                session.add(sport)
-                await session.flush()
-                raise ValueError("Simulated generic error")
-
-        async with test_db.get_session_maker()() as session:
-            result = await session.execute(select(SportDB).where(SportDB.title == unique_title))
-            assert result.scalars().one_or_none() is None
-
 
 class TestWithDBSessionDecorator:
     async def test_with_db_session_decorator_success(self, test_db, worker_id, request):

@@ -7,6 +7,10 @@ from src.auth.dependencies import require_roles
 from src.core import BaseRouter, db
 from src.core.dependencies import TournamentService
 from src.core.models import TournamentDB, handle_view_exceptions
+from src.helpers.fetch_helpers import (
+    fetch_list_of_matches_data,
+    fetch_matches_with_data_by_tournament_paginated,
+)
 from src.pars_eesl.pars_season import parse_season_and_create_jsons
 from src.pars_eesl.pars_tournament import parse_tournament_and_create_jsons
 from src.tournaments.parser import tournament_parser

@@ -240,12 +240,9 @@ class TestMatchWebSocketHandler:
             await handler.process_data_websocket(websocket, client_id, match_id)
 
     async def test_process_data_websocket_unknown_message_type(self):
-        handler = MatchWebSocketHandler()
         websocket = AsyncMock()
         websocket.application_state = WebSocketState.CONNECTED
         websocket.send_json = AsyncMock()
-        client_id = "test_client"
-        match_id = 123
 
         mock_queue = AsyncMock()
 

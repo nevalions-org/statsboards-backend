@@ -34,10 +34,10 @@ class TestClockStateMachine:
 
         state_machine.start()
         asyncio.run(asyncio.sleep(0.1))
-        current_value_1 = state_machine.get_current_value()
+        state_machine.get_current_value()
 
         state_machine.pause()
-        paused_value = state_machine.get_current_value()
+        state_machine.get_current_value()
         assert state_machine.status == "paused"
 
         asyncio.run(asyncio.sleep(0.1))
@@ -47,7 +47,7 @@ class TestClockStateMachine:
         assert state_machine.started_at_ms is not None
 
         asyncio.run(asyncio.sleep(0.1))
-        current_value_2 = state_machine.get_current_value()
+        state_machine.get_current_value()
 
     def test_stop_does_not_override_paused_status(self):
         """Test that stop() sets status to stopped regardless of previous state."""
@@ -56,7 +56,7 @@ class TestClockStateMachine:
 
         state_machine.start()
         asyncio.run(asyncio.sleep(0.1))
-        current_value = state_machine.get_current_value()
+        state_machine.get_current_value()
 
         state_machine.pause()
         paused_value = state_machine.get_current_value()

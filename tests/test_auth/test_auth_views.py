@@ -19,7 +19,7 @@ async def test_user_with_role(test_db: Database):
     from src.auth.security import get_password_hash
     from src.users.db_services import UserServiceDB
 
-    service = UserServiceDB(test_db)
+    UserServiceDB(test_db)
 
     async with test_db.get_session_maker()() as db_session:
         role = RoleDB(name="test_role", description="Test role")
