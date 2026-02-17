@@ -10,6 +10,7 @@ from starlette.websockets import WebSocket, WebSocketState
 
 from src.core.config import settings
 from src.logging_config import get_logger
+from src.utils.redis_notifier import init_redis_notifier
 
 connection_socket_logger_helper = get_logger("ConnectionManager")
 
@@ -31,34 +32,150 @@ class MatchDataWebSocketManager:
         self._connection_lock = asyncio.Lock()
         self._listeners: dict[str, Callable] = {}
         self._is_degraded = False
+        self._using_fallback = False
+        self._fallback_mode_lock = asyncio.Lock()
+
+    async def _switch_to_fallback_mode(self) -> bool:
+        """Switch from Redis to PostgreSQL direct LISTEN mode.
+
+        Returns:
+            True if fallback succeeded, False otherwise.
+        """
+        async with self._fallback_mode_lock:
+            if self._using_fallback:
+                self.logger.debug("Already in fallback mode, skipping switch")
+                return True
+
+            self.logger.info("Switching to PostgreSQL direct LISTEN fallback mode")
+            try:
+                await self._cleanup_postgres_listeners()
+                self.connection = None
+                await self.connect_to_db()
+                if self.is_connected:
+                    self._using_fallback = True
+                    self._is_degraded = False
+                    self.logger.info(
+                        "Fallback to PostgreSQL direct LISTEN successful - realtime features recovered"
+                    )
+                    return True
+                else:
+                    self.logger.error("Failed to establish PostgreSQL fallback connection")
+                    return False
+            except Exception as e:
+                self.logger.error(f"Error switching to fallback mode: {str(e)}", exc_info=True)
+                return False
+
+    async def _switch_to_redis_mode(self) -> bool:
+        """Switch from PostgreSQL fallback back to Redis mode.
+
+        Returns:
+            True if switch succeeded, False otherwise.
+        """
+        async with self._fallback_mode_lock:
+            if not self._using_fallback:
+                self.logger.debug("Not in fallback mode, skipping Redis switch")
+                return True
+
+            self.logger.info("Switching back to Redis pub/sub mode")
+            try:
+                await self._cleanup_postgres_listeners()
+                if self.connection:
+                    await self.connection.close()
+                    self.connection = None
+                    self.logger.info("PostgreSQL fallback connection closed")
+
+                await self.connect_to_redis()
+                if self._redis_notifier and (
+                    not self._redis_listen_task or self._redis_listen_task.done()
+                ):
+                    self._redis_listen_task = asyncio.create_task(
+                        self._redis_notifier.listen_loop()
+                    )
+                    self.logger.info("Redis listen loop started")
+
+                if self.is_connected:
+                    self._using_fallback = False
+                    self._is_degraded = False
+                    self.logger.info("Switch back to Redis mode successful")
+                    return True
+                else:
+                    self.logger.warning("Redis reconnection failed, staying in fallback mode")
+                    return False
+            except Exception as e:
+                self.logger.error(f"Error switching to Redis mode: {str(e)}", exc_info=True)
+                return False
+
+    async def _cleanup_postgres_listeners(self) -> None:
+        """Clean up PostgreSQL listeners cleanly."""
+        if self.connection and self._listeners:
+            for channel, listener in list(self._listeners.items()):
+                try:
+                    await self.connection.remove_listener(channel, listener)
+                    self.logger.debug(f"Removed PostgreSQL listener for channel: {channel}")
+                except Exception as e:
+                    self.logger.warning(
+                        f"Error removing PostgreSQL listener for {channel}: {str(e)}"
+                    )
+            self._listeners.clear()
 
     async def maintain_connection(self):
         while True:
             try:
                 if not self.is_connected:
                     if self.use_redis:
-                        await self.connect_to_redis()
-                        if self._redis_notifier and (
-                            not self._redis_listen_task or self._redis_listen_task.done()
-                        ):
-                            self._redis_listen_task = asyncio.create_task(
-                                self._redis_notifier.listen_loop()
-                            )
-                            self.logger.info("Redis listen loop restarted")
-                        if self._is_degraded:
-                            self.logger.info(
-                                "Redis connection restored - realtime features recovered"
-                            )
-                            self._is_degraded = False
+                        try:
+                            await self.connect_to_redis()
+                            if self._redis_notifier and (
+                                not self._redis_listen_task or self._redis_listen_task.done()
+                            ):
+                                self._redis_listen_task = asyncio.create_task(
+                                    self._redis_notifier.listen_loop()
+                                )
+                                self.logger.info("Redis listen loop restarted")
+                            if self._is_degraded:
+                                self.logger.info(
+                                    "Redis connection restored - realtime features recovered"
+                                )
+                                self._is_degraded = False
+                            if self._using_fallback:
+                                await self._switch_to_redis_mode()
+                        except Exception as e:
+                            if not self._using_fallback:
+                                self.logger.warning(
+                                    f"Redis connection failed: {str(e)}. "
+                                    "Attempting fallback to PostgreSQL direct LISTEN."
+                                )
+                                await self._switch_to_fallback_mode()
                     else:
                         await self.connect_to_db()
+                elif self.use_redis and self._using_fallback:
+                    try:
+                        self.logger.debug("Attempting to reconnect to Redis while in fallback mode")
+                        test_notifier = await init_redis_notifier(self.redis_url)
+                        await test_notifier.subscribe()
+                        await test_notifier.unsubscribe()
+                        await test_notifier.disconnect()
+                        self.logger.info(
+                            "Redis connectivity restored, switching back to Redis mode"
+                        )
+                        await self._switch_to_redis_mode()
+                    except Exception as e:
+                        self.logger.debug(
+                            f"Redis still unavailable, continuing in fallback mode: {str(e)}"
+                        )
                 await asyncio.sleep(5)
             except Exception as e:
-                if self.use_redis and not self._is_degraded:
-                    self.logger.warning(
-                        f"Redis connection maintenance error: {str(e)}. Realtime features degraded."
-                    )
-                    self._is_degraded = True
+                if self.use_redis:
+                    if not self._using_fallback:
+                        self.logger.warning(
+                            f"Connection maintenance error: {str(e)}. Attempting fallback."
+                        )
+                        await self._switch_to_fallback_mode()
+                    else:
+                        self.logger.error(
+                            f"Connection maintenance error in fallback mode: {str(e)}",
+                            exc_info=True,
+                        )
                 else:
                     self.logger.error(f"Connection maintenance error: {str(e)}", exc_info=True)
                 self.is_connected = False
@@ -203,10 +320,21 @@ class MatchDataWebSocketManager:
             if self.use_redis:
                 self.logger.warning(
                     f"Redis connection failed during startup: {str(e)}. "
-                    "Realtime features degraded - backend will continue serving HTTP/API endpoints. "
-                    "Background reconnection attempts will continue."
+                    "Attempting fallback to PostgreSQL direct LISTEN."
                 )
-                self._is_degraded = True
+                fallback_succeeded = await self._switch_to_fallback_mode()
+                if fallback_succeeded:
+                    connection_succeeded = True
+                    self.logger.info(
+                        "WebSocket manager started in fallback mode - using PostgreSQL direct LISTEN"
+                    )
+                else:
+                    self.logger.warning(
+                        "Fallback to PostgreSQL failed. Realtime features degraded - "
+                        "backend will continue serving HTTP/API endpoints. "
+                        "Background reconnection attempts will continue."
+                    )
+                    self._is_degraded = True
             else:
                 self.logger.error(f"Startup error: {str(e)}", exc_info=True)
                 raise
@@ -214,7 +342,8 @@ class MatchDataWebSocketManager:
         if not self._connection_retry_task or self._connection_retry_task.done():
             self._connection_retry_task = asyncio.create_task(self.maintain_connection())
             if connection_succeeded:
-                self.logger.info("WebSocket manager startup complete")
+                mode = "fallback" if self._using_fallback else "normal"
+                self.logger.info(f"WebSocket manager startup complete (mode: {mode})")
             else:
                 self.logger.info(
                     "WebSocket manager started in degraded mode - realtime features unavailable"
