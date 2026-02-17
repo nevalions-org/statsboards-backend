@@ -11,7 +11,8 @@ WORKDIR /build
 
 # Install Poetry
 COPY pyproject.toml poetry.lock ./
-RUN pip install --no-cache-dir poetry
+ARG POETRY_VERSION=2.3.2
+RUN pip install --no-cache-dir --disable-pip-version-check --retries 10 --timeout 120 "poetry==${POETRY_VERSION}"
 RUN poetry config virtualenvs.create false
 
 # Install all dependencies (including dev/test/prod)
