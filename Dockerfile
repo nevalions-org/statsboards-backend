@@ -3,6 +3,7 @@ FROM python:3.12.3-slim AS builder
 
 # Install build dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl \
     gcc \
     g++ \
     && rm -rf /var/lib/apt/lists/*
@@ -12,7 +13,18 @@ WORKDIR /build
 # Install Poetry
 COPY pyproject.toml poetry.lock ./
 ARG POETRY_VERSION=2.3.2
-RUN pip install --no-cache-dir --disable-pip-version-check --retries 10 --timeout 120 "poetry==${POETRY_VERSION}"
+RUN set -eux; \
+    for attempt in 1 2 3; do \
+        if pip install --no-cache-dir --disable-pip-version-check --retries 5 --timeout 180 "poetry==${POETRY_VERSION}"; then \
+            break; \
+        fi; \
+        echo "pip install poetry failed on attempt ${attempt}, retrying..."; \
+        sleep $((attempt * 15)); \
+    done; \
+    if ! command -v poetry >/dev/null 2>&1; then \
+        curl -sSL https://install.python-poetry.org | python3 - --version "${POETRY_VERSION}"; \
+        ln -sf /root/.local/bin/poetry /usr/local/bin/poetry; \
+    fi
 RUN poetry config virtualenvs.create false
 
 # Install all dependencies (including dev/test/prod)
