@@ -9,6 +9,6 @@ BASE_TOURNAMENT_URL = BASE_URL + "tournament/"
 BASE_TEAM_URL = BASE_URL + "team/"  # default
 BASE_TEAM_TOURNAMENT_URL = BASE_TOURNAMENT_URL + "teams/application?team_id="  # tournament
 BASE_MATCH_URL = BASE_URL + "match/"
-SEASON_ID = os.getenv("CURRENT_SEASON_ID")
+SEASON_ID = int(os.getenv("CURRENT_SEASON_ID", "1"))
 match_id = "29"
 TEST_DOWNLOADS_PATH = str(Path(__file__).parent.parent.parent / "test_downloads")
