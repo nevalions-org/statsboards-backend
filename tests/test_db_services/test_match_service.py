@@ -244,6 +244,45 @@ class TestMatchServiceDBCreateOrUpdate:
         result = await match_service.get_match_with_details(99999)
         assert result is None
 
+    async def test_get_scoreboard_fetch_bundle(
+        self, test_db: Database, tournament_data, teams_data
+    ):
+        """Test bundled scoreboard fetch data includes key related entities."""
+        tournament_service = TournamentServiceDB(test_db)
+        created_tournament = await tournament_service.create_or_update_tournament(tournament_data)
+
+        team_a, team_b = teams_data
+
+        match_service = MatchServiceDB(test_db)
+        created = await match_service.create(
+            MatchFactory.build(
+                match_eesl_id=501,
+                tournament_id=created_tournament.id,
+                team_a_id=team_a.id,
+                team_b_id=team_b.id,
+                match_date=datetime.now(),
+            )
+        )
+
+        result = await match_service.get_scoreboard_fetch_bundle(created.id)
+
+        assert result is not None
+        assert result["match"].id == created.id
+        assert result["teams"]["team_a"]["id"] == team_a.id
+        assert result["teams"]["team_b"]["id"] == team_b.id
+        assert result["sport"] is not None
+        assert result["sport"].id == created_tournament.sport_id
+        assert result["scoreboard"] is None
+        assert result["match_data"] is None
+        assert result["players"] == []
+        assert result["events"] == []
+
+    async def test_get_scoreboard_fetch_bundle_not_found(self, test_db: Database):
+        """Test bundled scoreboard fetch data returns None for missing match."""
+        match_service = MatchServiceDB(test_db)
+        result = await match_service.get_scoreboard_fetch_bundle(99999)
+        assert result is None
+
     async def test_get_sport_by_match_id(self, test_db: Database, tournament_data, teams_data):
         """Test retrieving sport by match_id."""
         tournament_service = TournamentServiceDB(test_db)

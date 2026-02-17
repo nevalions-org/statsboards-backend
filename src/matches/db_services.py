@@ -556,6 +556,107 @@ class MatchServiceDB(ServiceRegistryAccessorMixin, BaseServiceDB):
         self.logger.debug("Got scoreboard successfully")
         return self.first_or_none(result)
 
+    @handle_service_exceptions(
+        item_name=ITEM,
+        operation="getting bundled scoreboard fetch data",
+        return_value_on_not_found=None,
+    )
+    async def get_scoreboard_fetch_bundle(
+        self,
+        match_id: int,
+    ) -> dict | None:
+        """Get match scoreboard payload dependencies with eager loading.
+
+        This method is optimized for websocket scoreboard payload assembly and
+        avoids per-entity fetches by loading the core graph in one session.
+        """
+        from src.core.models.player import PlayerDB
+        from src.core.models.tournament import TournamentDB
+
+        self.logger.debug(f"Get bundled scoreboard fetch data for {ITEM} id:{match_id}")
+
+        async with self.db.get_session_maker()() as session:
+            stmt = (
+                select(MatchDB)
+                .where(MatchDB.id == match_id)
+                .options(
+                    joinedload(MatchDB.team_a),
+                    joinedload(MatchDB.team_b),
+                    joinedload(MatchDB.main_sponsor),
+                    joinedload(MatchDB.sponsor_line).selectinload(SponsorLineDB.sponsors),
+                    joinedload(MatchDB.tournaments).options(
+                        joinedload(TournamentDB.main_sponsor),
+                        joinedload(TournamentDB.sponsor_line).selectinload(SponsorLineDB.sponsors),
+                        joinedload(TournamentDB.sport).joinedload(SportDB.scoreboard_preset),
+                    ),
+                    selectinload(MatchDB.match_data),
+                    selectinload(MatchDB.match_scoreboard),
+                    selectinload(MatchDB.match_events),
+                    selectinload(MatchDB.match_players)
+                    .selectinload(PlayerMatchDB.player_team_tournament)
+                    .selectinload(PlayerTeamTournamentDB.player)
+                    .selectinload(PlayerDB.person),
+                    selectinload(MatchDB.match_players).selectinload(PlayerMatchDB.match_position),
+                    selectinload(MatchDB.match_players).selectinload(PlayerMatchDB.team),
+                )
+            )
+            result = await session.execute(stmt)
+            match = result.scalars().unique().one_or_none()
+
+            if match is None:
+                return None
+
+            sport = match.tournaments.sport if match.tournaments else None
+            players_with_data: list[dict] = []
+            for player in match.match_players or []:
+                players_with_data.append(
+                    {
+                        "id": player.id,
+                        "player_id": (
+                            player.player_team_tournament.player_id
+                            if player.player_team_tournament
+                            else None
+                        ),
+                        "player": (
+                            player.player_team_tournament.player
+                            if player.player_team_tournament
+                            else None
+                        ),
+                        "team": player.team,
+                        "match_number": player.match_number,
+                        "position": (
+                            {
+                                **player.match_position.__dict__,
+                                "category": player.match_position.category,
+                            }
+                            if player.match_position
+                            else None
+                        ),
+                        "player_team_tournament": player.player_team_tournament,
+                        "person": (
+                            player.player_team_tournament.player.person
+                            if player.player_team_tournament
+                            and player.player_team_tournament.player
+                            else None
+                        ),
+                        "is_starting": player.is_starting,
+                        "starting_type": player.starting_type,
+                    }
+                )
+
+            return {
+                "match": match,
+                "scoreboard": match.match_scoreboard,
+                "match_data": match.match_data,
+                "sport": sport,
+                "players": players_with_data,
+                "events": list(match.match_events or []),
+                "teams": {
+                    "team_a": match.team_a.__dict__ if match.team_a else None,
+                    "team_b": match.team_b.__dict__ if match.team_b else None,
+                },
+            }
+
     async def _get_available_players(
         self, session, team_id: int, tournament_id: int, match_id: int
     ) -> list[dict]:

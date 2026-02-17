@@ -1,7 +1,8 @@
 import asyncio
 import datetime
 import time
-from typing import Any
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Any
 
 from fastapi import status
 from sqlalchemy import select
@@ -15,6 +16,7 @@ from src.core.models import (
     SportScoreboardPresetDB,
     TeamDB,
 )
+from src.core.models.base import Database
 from src.core.period_clock import calculate_effective_gameclock_max, extract_period_index
 from src.gameclocks.db_services import GameClockServiceDB
 from src.gameclocks.schemas import GameClockSchemaCreate
@@ -27,10 +29,82 @@ from src.scoreboards.db_services import ScoreboardServiceDB
 from src.scoreboards.schemas import ScoreboardSchemaCreate
 from src.tournaments.db_services import TournamentServiceDB
 
+if TYPE_CHECKING:
+    from src.matches.db_services import MatchServiceDB
+
 logger = get_logger("helpers")
 fetch_data_logger = get_logger("fetch_data")
 
 _db_semaphore = asyncio.Semaphore(10)
+
+
+@dataclass(slots=True)
+class _FetchServices:
+    match_service: "MatchServiceDB"
+    match_data_service: MatchDataServiceDB
+    scoreboard_service: ScoreboardServiceDB
+
+
+_fetch_services_by_db: dict[int, _FetchServices] = {}
+
+
+def _get_fetch_services(database: Database) -> _FetchServices:
+    cache_key = id(database)
+    cached = _fetch_services_by_db.get(cache_key)
+    if cached is not None:
+        return cached
+
+    from src.matches.db_services import MatchServiceDB
+
+    services = _FetchServices(
+        match_service=MatchServiceDB(database),
+        match_data_service=MatchDataServiceDB(database),
+        scoreboard_service=ScoreboardServiceDB(database),
+    )
+    _fetch_services_by_db[cache_key] = services
+    return services
+
+
+def _match_payload_dict(match: Any) -> dict[str, Any] | None:
+    """Serialize match with a bounded relationship set to avoid recursive graphs."""
+    allowed_relationship_keys = {"tournaments", "main_sponsor", "sponsor_line", "team_a", "team_b"}
+
+    payload: dict[str, Any] = {}
+    for column in match.__mapper__.columns:
+        payload[column.key] = getattr(match, column.key)
+
+    for rel_key in allowed_relationship_keys:
+        if rel_key in match.__dict__:
+            payload[rel_key] = getattr(match, rel_key)
+
+    return deep_dict_convert(payload)
+
+
+def _orm_columns_dict(instance: Any) -> dict[str, Any]:
+    """Serialize only ORM column values (excludes recursive relationships)."""
+    mapper = getattr(instance, "__mapper__", None)
+    if mapper is None:
+        return {}
+    return {column.key: getattr(instance, column.key) for column in mapper.columns}
+
+
+def _serialize_player_payload(player: dict[str, Any]) -> dict[str, Any]:
+    position_raw = player.get("position")
+    position_payload = deep_dict_convert(position_raw) if isinstance(position_raw, dict) else None
+
+    return {
+        "id": player.get("id"),
+        "player_id": player.get("player_id"),
+        "match_number": player.get("match_number"),
+        "is_starting": player.get("is_starting"),
+        "starting_type": player.get("starting_type"),
+        "position": position_payload,
+        "team": _orm_columns_dict(player.get("team")),
+        "player": _orm_columns_dict(player.get("player")),
+        "person": _orm_columns_dict(player.get("person")),
+        "player_team_tournament": _orm_columns_dict(player.get("player_team_tournament")),
+    }
+
 
 DEFAULT_QUICK_SCORE_DELTAS: list[int] = [6, 3, 2, 1, -1]
 DEFAULT_SCORE_FORM_GOAL_LABEL = "TD"
@@ -330,36 +404,32 @@ async def fetch_with_scoreboard_data(
         if result:
             return result
 
-    from src.matches.db_services import MatchServiceDB
-
     fetch_data_logger.debug(f"Starting fetching match data with match_id {match_id}")
     _db = database or db
-    scoreboard_data_service = ScoreboardServiceDB(_db)
-    match_data_service_db = MatchDataServiceDB(_db)
-    match_service_db = MatchServiceDB(_db)
+    services = _get_fetch_services(_db)
+    match_service_db = services.match_service
+    match_data_service_db = services.match_data_service
+    scoreboard_data_service = services.scoreboard_service
 
     try:
         async with _db_semaphore:
-            (
-                scoreboard_data,
-                match,
-                match_teams_data,
-                match_data,
-                players,
-                events,
-                sport,
-            ) = await asyncio.gather(
-                match_service_db.get_scoreboard_by_match(match_id),
-                match_service_db.get_match_with_tournament_sponsor(match_id),
-                match_service_db.get_teams_by_match(match_id),
-                match_service_db.get_matchdata_by_match(match_id),
-                match_service_db.get_players_with_full_data_optimized(match_id),
-                _fetch_events_by_match(match_id, database=_db),
-                match_service_db.get_sport_by_match_id(match_id),
-            )
-        fetch_data_logger.debug(f"Fetched scoreboard for match_id: {match_id}")
-        fetch_data_logger.debug(f"Fetched match for match_id: {match_id}")
-        fetch_data_logger.debug(f"Fetched match_data for match_id: {match_id}")
+            bundled_data = await match_service_db.get_scoreboard_fetch_bundle(match_id)
+
+        if bundled_data is None:
+            fetch_data_logger.error(f"Match not found for match_id:{match_id}")
+            return {
+                "status_code": status.HTTP_404_NOT_FOUND,
+            }
+
+        match = bundled_data["match"]
+        scoreboard_data = bundled_data["scoreboard"]
+        match_data = bundled_data["match_data"]
+        sport = bundled_data["sport"]
+        players = bundled_data["players"]
+        events = bundled_data["events"]
+        match_teams_data = bundled_data["teams"]
+
+        fetch_data_logger.debug(f"Fetched bundled scoreboard payload data for match_id: {match_id}")
 
         # Fetch sponsor_line sponsors with positions (for match and tournament)
         match_sponsor_line_id = match.sponsor_line_id if match else None
@@ -385,7 +455,6 @@ async def fetch_with_scoreboard_data(
                 )
                 scoreboard_data_schema = ScoreboardSchemaCreate(match_id=match_id)
 
-                sport = await match_service_db.get_sport_by_match_id(match_id)
                 if sport and sport.scoreboard_preset:
                     preset_values = _get_preset_values_for_scoreboard(sport.scoreboard_preset)
                     fetch_data_logger.debug(
@@ -401,9 +470,10 @@ async def fetch_with_scoreboard_data(
 
                 fetch_data_logger.debug(f"Schema for scoreboard data {scoreboard_data_schema}")
                 scoreboard_data = await scoreboard_data_service.create(scoreboard_data_schema)
+                match.match_scoreboard = scoreboard_data
 
             # Convert match to dict and rename 'tournaments' to 'tournament' for frontend compatibility
-            match_dict = deep_dict_convert(match.__dict__)
+            match_dict = _match_payload_dict(match)
             if match_dict and "tournaments" in match_dict:
                 match_dict["tournament"] = match_dict.pop("tournaments")
 
@@ -484,18 +554,18 @@ async def fetch_with_scoreboard_data(
                     "match": match_dict,
                     "sponsors_data": sponsors_data,
                     "scoreboard_data": {
-                        **(instance_to_dict(dict(scoreboard_data.__dict__)) or {}),
+                        **_orm_columns_dict(scoreboard_data),
                         "has_timeouts": bool(preset.has_timeouts) if preset is not None else True,
                         "has_playclock": bool(preset.has_playclock) if preset is not None else True,
                         "quick_score_deltas": _preset_quick_score_deltas(preset),
                         **goal_metadata,
                     },
                     "teams_data": deep_dict_convert(match_teams_data),
-                    "match_data": instance_to_dict(dict(match_data.__dict__)),
-                    "players": [deep_dict_convert(player) for player in players] if players else [],
-                    "events": [deep_dict_convert(event.__dict__) for event in events]
-                    if events
+                    "match_data": _orm_columns_dict(match_data),
+                    "players": [_serialize_player_payload(player) for player in players]
+                    if players
                     else [],
+                    "events": [_orm_columns_dict(event) for event in events] if events else [],
                 }
             }
             match_id = final_match_with_scoreboard_data_fetched.get("data", {}).get(
@@ -513,11 +583,6 @@ async def fetch_with_scoreboard_data(
             )
 
             return final_match_with_scoreboard_data_fetched
-        else:
-            fetch_data_logger.error(f"Match not found for match_id:{match_id}")
-            return {
-                "status_code": status.HTTP_404_NOT_FOUND,
-            }
     except Exception as e:
         fetch_data_logger.error(
             f"Error while fetching matchdata with scoreboard: {e}", exc_info=True
