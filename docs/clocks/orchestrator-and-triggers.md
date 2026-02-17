@@ -43,6 +43,8 @@ Callbacks are set by services:
 - PlayClock: `trigger_update_playclock`, `_stop_playclock_internal`
 - GameClock: `trigger_update_gameclock`, `_stop_gameclock_internal`
 
+Self-healing behavior (STAB-250): If a pod misses a stop/pause event due to multi-pod deployment desync, the `trigger_update_*` callbacks detect `STOPPED` or `PAUSED` status from the database and auto-unregister from the local orchestrator, preventing excessive logging.
+
 Gameclock stop persistence semantics:
 
 - `direction=down`: terminal value is persisted as `0`

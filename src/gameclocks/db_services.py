@@ -317,13 +317,20 @@ class GameClockServiceDB(BaseServiceDB):
         self.logger.debug(f"Trigger update gameclock for gameclock id:{gameclock_id}")
         gameclock: GameClockSchemaBase | None = await self.get_by_id(gameclock_id)
 
+        if gameclock and gameclock.gameclock_status in (ClockStatus.STOPPED, ClockStatus.PAUSED):
+            self.logger.debug(
+                f"Gameclock {gameclock_id} is {gameclock.gameclock_status}, auto-unregistering"
+            )
+            clock_orchestrator.unregister_gameclock(gameclock_id)
+            await self.clock_manager.end_clock(gameclock_id)
+
         active_clock_matches = self.clock_manager.active_gameclock_matches
 
         if gameclock_id in active_clock_matches:
             matchdata_clock_queue = active_clock_matches[gameclock_id]
             await matchdata_clock_queue.put(gameclock)
         else:
-            self.logger.warning(f"No active gameclock found with id:{gameclock_id}")
+            self.logger.debug(f"No active gameclock found with id:{gameclock_id}")
 
     async def compute_reset_value(self, gameclock_id: int) -> int | None:
         """

@@ -314,10 +314,17 @@ class PlayClockServiceDB(BaseServiceDB):
         self.logger.debug(f"Trigger update playclock for playclock id:{playclock_id}")
         playclock: PlayClockDB | None = await self.get_by_id(playclock_id)
 
+        if playclock and playclock.playclock_status in (ClockStatus.STOPPED, ClockStatus.PAUSED):
+            self.logger.debug(
+                f"Playclock {playclock_id} is {playclock.playclock_status}, auto-unregistering"
+            )
+            clock_orchestrator.unregister_playclock(playclock_id)
+            await self.clock_manager.end_clock(playclock_id)
+
         active_clock_matches = self.clock_manager.active_playclock_matches
 
         if playclock_id in active_clock_matches:
             matchdata_clock_queue = active_clock_matches[playclock_id]
             await matchdata_clock_queue.put(playclock)
         else:
-            self.logger.warning(f"No active playclock found with id:{playclock_id}")
+            self.logger.debug(f"No active playclock found with id:{playclock_id}")
