@@ -118,12 +118,9 @@ services:
     labels:
       logging: "promtail"
       logging_jobname: "statsboards_backend_prod_logs"
-    image: statsboards-backend-prod:latest
+    image: nevalions/statsboards-backend:${BACKEND_IMAGE_TAG:-latest}
     container_name: statsboards-backend-prod-container
-    build:
-      context: .
-      dockerfile: Dockerfile.prod
-    command: poetry run python run_prod_server.py
+    command: python -m src.run_prod_server
     ports:
       - "9000:9000"
     volumes:

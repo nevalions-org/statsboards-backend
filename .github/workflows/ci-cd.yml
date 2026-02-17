@@ -80,6 +80,8 @@ jobs:
   build-and-push:
     needs: test
     runs-on: arc-runner-set
+    outputs:
+      image_tag: ${{ steps.get_tag.outputs.tag }}
 
     steps:
     - name: Checkout code
@@ -111,6 +113,7 @@ jobs:
         tags: |
           ${{ secrets.DOCKERHUB_USERNAME }}/statsboards-backend:latest
           ${{ secrets.DOCKERHUB_USERNAME }}/statsboards-backend:${{ steps.get_tag.outputs.tag }}
+          ${{ secrets.DOCKERHUB_USERNAME }}/statsboards-backend:${{ github.sha }}
           ${{ secrets.DOCKERHUB_USERNAME }}/statsboards-backend:dev
           ${{ secrets.DOCKERHUB_USERNAME }}/statsboards-backend:prod
         cache-from: type=registry,ref=${{ secrets.DOCKERHUB_USERNAME }}/statsboards-backend:buildcache
@@ -119,6 +122,8 @@ jobs:
   deploy-k8s-dev:
     needs: build-and-push
     runs-on: arc-runner-set
+    outputs:
+      image_tag: ${{ needs.build-and-push.outputs.image_tag }}
 
     steps:
     - name: Install kubectl
@@ -138,6 +143,8 @@ jobs:
   deploy-production:
     needs: deploy-k8s-dev
     runs-on: arc-runner-set
+    env:
+      BACKEND_IMAGE_TAG: ${{ needs.deploy-k8s-dev.outputs.image_tag }}
 
     steps:
     - name: Checkout code
@@ -155,6 +162,7 @@ jobs:
         echo "Host: ${{ secrets.SSH_HOST }}"
         echo "User: ${{ secrets.SSH_USER }}"
         echo "Work Dir: ${{ secrets.WORK_DIR }}"
+        echo "Image Tag: $BACKEND_IMAGE_TAG"
         if [[ -z "${{ secrets.SSH_USER }}" || -z "${{ secrets.SSH_HOST }}" || -z "${{ secrets.WORK_DIR }}" ]]; then
           echo "Error: One or more required secrets are missing or empty!" >&2
           exit 1
@@ -167,8 +175,9 @@ jobs:
         ssh ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }} "\
           cd ${{ secrets.WORK_DIR }} && \
           git pull || (echo 'Git pull failed' && exit 1) && \
-          docker-compose -f docker-compose.prod.yml build statsboards-backend || (echo 'Docker build failed' && exit 1) && \
-          docker-compose -f docker-compose.prod.yml run --rm statsboards-backend poetry run alembic upgrade head || (echo 'Alembic migration failed' && exit 1) && \
+          export BACKEND_IMAGE_TAG=$BACKEND_IMAGE_TAG && \
+          docker-compose -f docker-compose.prod.yml pull statsboards-backend || (echo 'Docker pull failed' && exit 1) && \
+          docker-compose -f docker-compose.prod.yml run --rm statsboards-backend alembic upgrade head || (echo 'Alembic migration failed' && exit 1) && \
           docker-compose -f docker-compose.prod.yml up -d || (echo 'Docker deployment failed' && exit 1)"
 
     - name: Cleanup SSH Keys Locally
