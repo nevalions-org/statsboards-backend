@@ -85,7 +85,14 @@ def _orm_columns_dict(instance: Any) -> dict[str, Any]:
     mapper = getattr(instance, "__mapper__", None)
     if mapper is None:
         return {}
-    return {column.key: getattr(instance, column.key) for column in mapper.columns}
+    result = {}
+    for column in mapper.columns:
+        value = getattr(instance, column.key)
+        if isinstance(value, datetime.datetime):
+            result[column.key] = value.isoformat()
+        else:
+            result[column.key] = value
+    return result
 
 
 def _serialize_player_payload(player: dict[str, Any]) -> dict[str, Any]:

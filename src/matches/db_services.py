@@ -608,7 +608,15 @@ class MatchServiceDB(ServiceRegistryAccessorMixin, BaseServiceDB):
 
             sport = match.tournaments.sport if match.tournaments else None
             players_with_data: list[dict] = []
-            for player in match.match_players or []:
+            raw_match_players = match.match_players
+            match_players_list = (
+                raw_match_players
+                if isinstance(raw_match_players, list)
+                else [raw_match_players]
+                if raw_match_players is not None
+                else []
+            )
+            for player in match_players_list:
                 players_with_data.append(
                     {
                         "id": player.id,

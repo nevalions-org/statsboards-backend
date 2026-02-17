@@ -277,6 +277,78 @@ class TestMatchServiceDBCreateOrUpdate:
         assert result["players"] == []
         assert result["events"] == []
 
+    async def test_get_scoreboard_fetch_bundle_with_players(
+        self, test_db: Database, tournament_data, teams_data
+    ):
+        """Test bundled fetch handles match with players (regression for scalar match_players)."""
+        from src.person.db_services import PersonServiceDB
+        from src.person.schemas import PersonSchemaCreate
+        from src.player.db_services import PlayerServiceDB
+        from src.player.schemas import PlayerSchemaCreate
+        from src.player_match.db_services import PlayerMatchServiceDB
+        from src.player_match.schemas import PlayerMatchSchemaCreate
+        from src.player_team_tournament.db_services import PlayerTeamTournamentServiceDB
+        from src.player_team_tournament.schemas import PlayerTeamTournamentSchemaCreate
+
+        tournament_service = TournamentServiceDB(test_db)
+        created_tournament = await tournament_service.create_or_update_tournament(tournament_data)
+
+        team_a, team_b = teams_data
+
+        match_service = MatchServiceDB(test_db)
+        created = await match_service.create(
+            MatchFactory.build(
+                match_eesl_id=502,
+                tournament_id=created_tournament.id,
+                team_a_id=team_a.id,
+                team_b_id=team_b.id,
+                match_date=datetime.now(),
+            )
+        )
+
+        person_service = PersonServiceDB(test_db)
+        person = await person_service.create(
+            PersonSchemaCreate(
+                person_name="Test", person_surname="Player", person_dob=datetime(2000, 1, 1)
+            )
+        )
+
+        player_service = PlayerServiceDB(test_db)
+        player = await player_service.create(
+            PlayerSchemaCreate(sport_id=created_tournament.sport_id, person_id=person.id)
+        )
+
+        ptt_service = PlayerTeamTournamentServiceDB(test_db)
+        ptt = await ptt_service.create(
+            PlayerTeamTournamentSchemaCreate(
+                player_id=player.id,
+                team_id=team_a.id,
+                tournament_id=created_tournament.id,
+                player_number="10",
+            )
+        )
+
+        player_match_service = PlayerMatchServiceDB(test_db)
+        await player_match_service.create_or_update_player_match(
+            PlayerMatchSchemaCreate(
+                player_match_eesl_id=999,
+                player_team_tournament_id=ptt.id,
+                match_id=created.id,
+                team_id=team_a.id,
+                match_number="10",
+                is_start=True,
+            )
+        )
+
+        result = await match_service.get_scoreboard_fetch_bundle(created.id)
+
+        assert result is not None
+        assert result["match"].id == created.id
+        assert result["teams"]["team_a"]["id"] == team_a.id
+        assert isinstance(result["players"], list)
+        assert len(result["players"]) == 1
+        assert result["players"][0]["player_id"] == player.id
+
     async def test_get_scoreboard_fetch_bundle_not_found(self, test_db: Database):
         """Test bundled scoreboard fetch data returns None for missing match."""
         match_service = MatchServiceDB(test_db)
