@@ -1,5 +1,5 @@
 # Build stage
-FROM python:3.12.3-slim as builder
+FROM python:3.12.3-slim AS builder
 
 # Install build dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
