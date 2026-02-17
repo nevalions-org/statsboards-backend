@@ -56,7 +56,9 @@ jobs:
         ssh ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }} "\
           cd ${{ secrets.WORK_DIR }} && \
           git pull || (echo 'Git pull failed' && exit 1) && \
-          docker-compose -f docker-compose.prod.yml up -d --build || (echo 'Docker deployment failed' && exit 1)"
+          docker-compose -f docker-compose.prod.yml build statsboards-backend || (echo 'Docker build failed' && exit 1) && \
+          docker-compose -f docker-compose.prod.yml run --rm statsboards-backend poetry run alembic upgrade head || (echo 'Alembic migration failed' && exit 1) && \
+          docker-compose -f docker-compose.prod.yml up -d || (echo 'Docker deployment failed' && exit 1)"
 
     - name: Cleanup SSH Keys Locally
       if: always()
