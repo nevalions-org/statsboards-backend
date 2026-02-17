@@ -8,4 +8,13 @@
 - Always clean up connections on disconnect
 - WebSocket compression (permessage-deflate) is enabled and logged per connection
 
+## Failure Modes
+
+When Redis is used for pub/sub:
+- **CRUD operations unaffected** - PostgreSQL is the source of truth
+- **Realtime notifications degraded** during Redis outage (message loss possible)
+- **Automatic fallback** to direct PostgreSQL LISTEN maintains updates
+
+For detailed failure behavior and k8s validation steps, see `docs/REDIS_NOTIFY_IMPLEMENTATION.md#failure-modes-and-behavior`.
+
 For endpoint and message formats, see `docs/api/websockets.md`.
