@@ -313,6 +313,10 @@ class Settings(BaseSettings):
         default=2,
         description="Minimum seconds between statistics broadcasts",
     )
+    redis_url: str = Field(
+        default="redis://localhost:6379",
+        description="Redis connection URL for pub/sub",
+    )
 
     @property
     def static_main_path(self) -> Path:

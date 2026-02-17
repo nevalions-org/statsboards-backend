@@ -1,5 +1,6 @@
 import asyncio
 import json
+import os
 import time
 from collections.abc import Callable
 from typing import Any
@@ -14,13 +15,18 @@ connection_socket_logger_helper = get_logger("ConnectionManager")
 
 
 class MatchDataWebSocketManager:
-    def __init__(self, db_url):
+    def __init__(self, db_url: str, use_redis: bool = False, redis_url: str | None = None):
         self.db_url = db_url
-        self.connection = None
+        self.use_redis = use_redis
+        self.redis_url = redis_url or settings.redis_url
+        self.connection: asyncpg.Connection | None = None
+        self._redis_notifier = None
+        self._redis_listen_task: asyncio.Task | None = None
         self.logger = get_logger("MatchDataWebSocketManager", self)
-        self.logger.info("MatchDataWebSocketManager initialized")
+        mode = "Redis pub/sub" if use_redis else "PostgreSQL direct"
+        self.logger.info(f"MatchDataWebSocketManager initialized with mode: {mode}")
         self.is_connected = False
-        self._connection_retry_task = None
+        self._connection_retry_task: asyncio.Task | None = None
         self._cache_service = None
         self._connection_lock = asyncio.Lock()
         self._listeners: dict[str, Callable] = {}
@@ -29,12 +35,39 @@ class MatchDataWebSocketManager:
         while True:
             try:
                 if not self.is_connected:
-                    await self.connect_to_db()
+                    if self.use_redis:
+                        await self.connect_to_redis()
+                    else:
+                        await self.connect_to_db()
                 await asyncio.sleep(5)
             except Exception as e:
                 self.logger.error(f"Connection maintenance error: {str(e)}", exc_info=True)
                 self.is_connected = False
                 await asyncio.sleep(5)
+
+    async def connect_to_redis(self):
+        """Connect to Redis and set up pub/sub listeners."""
+        from src.utils.redis_notifier import init_redis_notifier
+
+        async with self._connection_lock:
+            try:
+                self._redis_notifier = await init_redis_notifier(self.redis_url)
+                await self._redis_notifier.subscribe()
+
+                listeners = self._get_listener_map()
+                self._listeners = listeners.copy()
+
+                for channel, callback in listeners.items():
+                    self._redis_notifier.register_callback(channel, callback)
+                    self.logger.info(f"Registered Redis callback for channel: {channel}")
+
+                self.is_connected = True
+                self.logger.info("Successfully connected to Redis pub/sub")
+
+            except Exception as e:
+                self.logger.error(f"Redis connection error: {str(e)}", exc_info=True)
+                self.is_connected = False
+                raise
 
     async def connect_to_db(self):
         async with self._connection_lock:
@@ -62,15 +95,7 @@ class MatchDataWebSocketManager:
         if self.connection is None:
             raise RuntimeError("Database connection not established")
 
-        listeners = {
-            "matchdata_change": self.match_data_listener,
-            "match_change": self.match_data_listener,
-            "scoreboard_change": self.match_data_listener,
-            "playclock_change": self.playclock_listener,
-            "gameclock_change": self.gameclock_listener,
-            "football_event_change": self.event_listener,
-            "player_match_change": self.players_update_listener,
-        }
+        listeners = self._get_listener_map()
 
         self._listeners = listeners.copy()
         failed_channels = []
@@ -89,6 +114,45 @@ class MatchDataWebSocketManager:
             if len(failed_channels) == len(listeners):
                 raise RuntimeError(f"All listeners failed to setup: {failed_channels}")
 
+    def _get_listener_map(self) -> dict[str, Callable]:
+        """Get the mapping of channel names to listener callbacks.
+
+        Returns:
+            Dict mapping PostgreSQL NOTIFY channel names to listener methods.
+        """
+        return {
+            "matchdata_change": self._create_pg_listener_wrapper(self.match_data_listener),
+            "match_change": self._create_pg_listener_wrapper(self.match_data_listener),
+            "scoreboard_change": self._create_pg_listener_wrapper(self.match_data_listener),
+            "playclock_change": self._create_pg_listener_wrapper(self.playclock_listener),
+            "gameclock_change": self._create_pg_listener_wrapper(self.gameclock_listener),
+            "football_event_change": self._create_pg_listener_wrapper(self.event_listener),
+            "player_match_change": self._create_pg_listener_wrapper(self.players_update_listener),
+        }
+
+    def _create_pg_listener_wrapper(self, listener_func: Callable) -> Callable:
+        """Create a wrapper that adapts between PostgreSQL and Redis callback signatures.
+
+        PostgreSQL listeners receive: (connection, pid, channel, payload)
+        Redis callbacks receive: (channel, payload_dict)
+
+        Args:
+            listener_func: The original listener function with PostgreSQL signature
+
+        Returns:
+            A wrapper function that works with both callback types
+        """
+
+        async def wrapper(connection_or_channel, pid_or_payload, channel=None, payload=None):
+            if self.use_redis:
+                actual_channel = connection_or_channel
+                actual_payload = pid_or_payload
+                await listener_func(None, None, actual_channel, json.dumps(actual_payload))
+            else:
+                await listener_func(connection_or_channel, pid_or_payload, channel, payload)
+
+        return wrapper
+
     def set_cache_service(self, cache_service):
         self._cache_service = cache_service
         self.logger.info("Cache service set for WebSocket manager")
@@ -104,7 +168,16 @@ class MatchDataWebSocketManager:
                 return
 
         try:
-            await self.connect_to_db()
+            if self.use_redis:
+                await self.connect_to_redis()
+                if self._redis_notifier:
+                    self._redis_listen_task = asyncio.create_task(
+                        self._redis_notifier.listen_loop()
+                    )
+                    self.logger.info("Redis listen loop started")
+            else:
+                await self.connect_to_db()
+
             if not self._connection_retry_task or self._connection_retry_task.done():
                 self._connection_retry_task = asyncio.create_task(self.maintain_connection())
                 self.logger.info("WebSocket manager startup complete")
@@ -305,6 +378,20 @@ class MatchDataWebSocketManager:
                     except asyncio.CancelledError:
                         pass
 
+                if self._redis_listen_task:
+                    self._redis_listen_task.cancel()
+                    try:
+                        await self._redis_listen_task
+                    except asyncio.CancelledError:
+                        pass
+                    self._redis_listen_task = None
+
+                if self._redis_notifier:
+                    await self._redis_notifier.unsubscribe()
+                    await self._redis_notifier.disconnect()
+                    self._redis_notifier = None
+                    self.logger.info("Redis pub/sub disconnected")
+
                 if self.connection:
                     for channel, listener in self._listeners.items():
                         try:
@@ -323,7 +410,13 @@ class MatchDataWebSocketManager:
                 self.logger.error(f"Error during shutdown: {str(e)}", exc_info=True)
 
 
-ws_manager = MatchDataWebSocketManager(db_url=settings.db.db_url_websocket())
+use_redis_notifier = os.getenv("USE_REDIS_NOTIFIER", "false").lower() in ("true", "1", "yes")
+
+ws_manager = MatchDataWebSocketManager(
+    db_url=settings.db.db_url_websocket(),
+    use_redis=use_redis_notifier,
+    redis_url=settings.redis_url,
+)
 
 
 class ConnectionManager:

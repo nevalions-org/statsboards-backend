@@ -25,3 +25,4 @@ Related docs:
 - `docs/SERVICE_LAYER_DECOUPLING.md`
 - `docs/CONFIGURATION_VALIDATION.md`
 - `docs/PG_TRGM_SEARCH_OPTIMIZATION.md`
+- `docs/REDIS_NOTIFY_IMPLEMENTATION.md` - Redis-based PostgreSQL NOTIFY multiplexing
