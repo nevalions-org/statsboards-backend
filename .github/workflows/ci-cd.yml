@@ -141,6 +141,12 @@ jobs:
           sudo mv kubectl /usr/local/bin/
           kubectl version --client
 
+      - name: Run Alembic Migrations (dev)
+        run: |
+          echo "Running database migrations..."
+          kubectl exec -n stats-dev deployment/statsboards-backend -c statsboards-backend -- alembic upgrade head
+          echo "Migrations complete!"
+
       - name: Rollout Backend Deployment (dev)
         run: |
           echo "Restarting statsboards-backend deployment in stats-dev namespace..."
