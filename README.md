@@ -1,10 +1,13 @@
 # StatsBoards Backend
 
+#
+
 A FastAPI-based backend service for sports statistics and scoreboarding, designed to manage multi-sport tournaments, matches, teams, and real-time game data.
 
 ## Supported Sports
 
 Currently implements:
+
 - **American Football** - Full game statistics including downs, yards, plays, and scoring
 - **Flag Football** - Adapted rules and statistics for flag football leagues
 - **Extensible Architecture** - Easy to add new sports through the sport management system
@@ -46,29 +49,34 @@ Currently implements:
 ### Installation
 
 1. **Clone repository**
+
    ```bash
    git clone <repository-url>
    cd statsboards-backend
    ```
 
 2. **Create and activate virtual environment**
+
    ```bash
    python -m venv venv
    source venv/bin/activate  # On Windows: venv\Scripts\activate
    ```
 
 3. **Install dependencies**
+
    ```bash
    poetry install
    ```
 
 4. **Set up environment**
+
    ```bash
    cp .env.example .env
    # Edit .env with your configuration
    ```
 
 5. **Set up database**
+
    ```bash
    # Apply database migrations
    alembic upgrade head
@@ -84,6 +92,7 @@ The API will be available at `http://localhost:9000`
 ## API Documentation
 
 Once running, visit:
+
 - **Swagger UI**: `http://localhost:9000/docs`
 - **ReDoc**: `http://localhost:9000/redoc`
 
@@ -116,6 +125,7 @@ pytest tests/test_db_services/test_tournament_service.py::TestTournamentServiceD
 ```
 
 **Important:**
+
 - Test database must be started before running tests: `docker-compose -f docker-compose.test-db-only.yml up -d`
 - Tests use 4 parallel databases (test_db, test_db2, test_db3, test_db4) with 4 workers for faster execution
 - Tests use PostgreSQL (not SQLite) to ensure production compatibility
@@ -242,6 +252,7 @@ docs/                          # Documentation
 ## Key Features
 
 ### Real-time Capabilities
+
 - Live match data streaming via WebSockets
 - Real-time scoreboard updates
 - Game clock and play clock synchronization via centralized ClockOrchestrator
@@ -249,6 +260,7 @@ docs/                          # Documentation
 - Match data queue management for concurrent updates
 
 ### Data Management
+
 - Complex many-to-many relationships (teams-tournaments, players-teams)
 - Player statistics tracking across matches and tournaments
 - Tournament and season management
@@ -257,6 +269,7 @@ docs/                          # Documentation
 - Match data with detailed event tracking (downs, yards, plays, scores, turnovers)
 
 ### Error Handling & Logging
+
 - Structured custom exception hierarchy
 - Global exception handlers with appropriate HTTP status codes
 - Standardized logging levels across all services
@@ -264,12 +277,14 @@ docs/                          # Documentation
 - Proper exception chaining with stack traces
 
 ### External Integration
+
 - EESL system data parsing and synchronization
 - Automated data import/export capabilities
 - Tournament team and player data parsing
 - Match data parsing from external sources
 
 ### Code Quality
+
 - Consistent service layer pattern with `BaseServiceDB`
 - Service registry pattern for dependency injection and decoupling
 - Comprehensive test coverage (~76% overall, 1465 tests passing in ~160s with 4 parallel workers)
@@ -302,11 +317,13 @@ The API provides comprehensive endpoints for:
 For endpoints that return full nested relationship data:
 
 **Single Resource Endpoints:**
+
 - **Matches with Details**: `GET /api/matches/{id}/with-details/`
 - **Teams with Details**: `GET /api/teams/{id}/with-details/`
 - **Tournaments with Details**: `GET /api/tournaments/{id}/with-details/`
 
 **Paginated Search Endpoints:**
+
 - **Matches with Details**: `GET /api/matches/with-details/paginated`
 - **Teams with Details**: `GET /api/teams/with-details/paginated`
 - **Tournaments with Details**: `GET /api/tournaments/with-details/paginated`
@@ -314,6 +331,7 @@ For endpoints that return full nested relationship data:
 These endpoints return nested objects (teams, tournaments, sponsors) instead of just foreign key IDs, providing richer data in a single API call.
 
 **See [docs/schemas/index.md](docs/schemas/index.md)** for detailed guide on:
+
 - All available combined schemas
 - When to use basic vs. combined schemas
 - Creating new complex schemas with eager loading
@@ -328,10 +346,12 @@ Each domain module follows the standard CRUD pattern with additional custom endp
 For comprehensive WebSocket documentation including message formats, connection examples, and troubleshooting guide, see **[WebSocket Endpoints section in API_DOCUMENTATION.md](docs/API_DOCUMENTATION.md#websocket-endpoints)**.
 
 **Note:** The following URLs are deprecated and no longer exist:
+
 - ❌ `ws://localhost:9000/ws/matchdata/{match_id}` (does not exist)
 - ❌ `ws://localhost:9000/ws/scoreboard/{scoreboard_id}` (does not exist)
 
 **Actual WebSocket endpoints:**
+
 - ✅ **Match Data**: `/api/matches/ws/id/{match_id}/{client_id}/` - Real-time match data, scores, clocks, events
 - ✅ **Match Statistics**: `/api/matches/ws/matches/{match_id}/stats` - Real-time match statistics with conflict resolution
 
@@ -344,6 +364,7 @@ For comprehensive development guidelines, coding standards and best practices, s
 - **[docs/schema-standardization/index.md](docs/schema-standardization/index.md)** - Schema standardization plan and checklist
 
 These documents cover:
+
 - Code style and naming conventions
 - Service layer and router patterns
 - Model patterns and relationship types
@@ -356,6 +377,7 @@ These documents cover:
 ### Quick Reference
 
 **Testing:**
+
 ```bash
 # Start test database
 docker-compose -f docker-compose.test-db-only.yml up -d
@@ -364,12 +386,14 @@ pytest
 ```
 
 **Code Quality:**
+
 ```bash
 # Lint with Ruff
 source venv/bin/activate && ruff check src/ tests/
 ```
 
 **Database Migrations:**
+
 ```bash
 # Apply migrations
 alembic upgrade head
@@ -408,6 +432,7 @@ Configuration validation also runs automatically on application startup before s
 Logging is configured via YAML files (`logging-config_dev.yaml`, `logging-config_info.yaml`). Call `setup_logging()` at module level in services and routers.
 
 **Log Levels:**
+
 - **debug**: Detailed operation tracking and successful HTTP requests
 - **info**: Significant operations (creates, updates, application startup)
 - **warning**: Expected but noteworthy situations (validation errors, 4xx HTTP responses)
@@ -415,6 +440,7 @@ Logging is configured via YAML files (`logging-config_dev.yaml`, `logging-config
 - **critical**: Unexpected errors that should rarely trigger
 
 **Log Format:**
+
 - Console: `[LEVEL] HH:MM:SS logger_name - message` (concise, level-first format)
 - File: `YYYY-MM-DD HH:MM:SS [LEVEL] logger_name - message - Class: ClassName - Func: function_name` (detailed with context)
 - Logs written to console and log files in `logs/` directory
@@ -433,6 +459,7 @@ Logging is configured via YAML files (`logging-config_dev.yaml`, `logging-config
 8. Submit a pull request
 
 **Important:**
+
 - All commits must be by linroot with email nevalions@gmail.com
 - Follow existing code patterns and conventions
 - Read `docs/development/index.md` for comprehensive development guidelines
@@ -440,6 +467,7 @@ Logging is configured via YAML files (`logging-config_dev.yaml`, `logging-config
 ## Recent Improvements
 
 ### Test Coverage Enhancements (January 2026)
+
 - Added parser tests for EESL player-team-tournament parsing (STAB-85)
   - 10 new tests covering multiple players, single player, no players, malformed HTML
   - Fixed TypedDict bug: `player_number` changed from `int` to `str`
@@ -452,6 +480,7 @@ Logging is configured via YAML files (`logging-config_dev.yaml`, `logging-config
 - Total: 56 new tests added to improve coverage
 
 ### Test Suite Fixes
+
 - Fixed 33 previously failing tests across multiple test suites
   - **test_player_match_views_helpers.py**: Fixed photo file handling tests (9 tests passing)
     - Corrected patch paths for uploads_path in tests
@@ -462,13 +491,14 @@ Logging is configured via YAML files (`logging-config_dev.yaml`, `logging-config
     - Improved exception handling for connection failure scenarios
   - **test_views/test_websocket_views.py**: Fixed WebSocket functionality tests (47 tests passing)
     - Corrected import path for MatchDataWebSocketManager
-     - Marked integration test requiring real database connections
-     - **test_pars_integration.py**: Integration tests working with proper markers (5 tests passing)
-      - Tests run correctly with `-m integration` flag
+    - Marked integration test requiring real database connections
+    - **test_pars_integration.py**: Integration tests working with proper markers (5 tests passing)
+    - Tests run correctly with `-m integration` flag
     - All 1465 tests now passing when excluding integration tests (in ~160s with 4 parallel workers)
 - Integration tests pass when run with appropriate markers
 
 ### Exception Handling Refactoring
+
 - Replaced generic `except Exception` clauses with specific exception types across all services
 - Implemented custom exception hierarchy in `src/core/exceptions.py`
 - Added global exception handlers with appropriate HTTP status codes
@@ -476,6 +506,7 @@ Logging is configured via YAML files (`logging-config_dev.yaml`, `logging-config
 - Enhanced logging with appropriate levels for each exception type
 
 ### Logging Standardization
+
 - Established clear logging guidelines with consistent levels
 - Updated all database services to use appropriate log levels
 - Changed successful operations from debug to info
@@ -484,6 +515,7 @@ Logging is configured via YAML files (`logging-config_dev.yaml`, `logging-config
 - Maintained critical level for unexpected errors
 
 ### Performance Optimizations
+
 - Optimized match data fetching with parallel database calls
 - Transaction rollback per test for faster execution
 - Database echo disabled in test fixtures
@@ -491,6 +523,7 @@ Logging is configured via YAML files (`logging-config_dev.yaml`, `logging-config
 - Improved query performance in service layer
 
 ### Testing Improvements
+
 - 1465 comprehensive tests passing (in ~160s with 4 parallel workers across 4 databases)
 - Test database optimization with Docker (creates test_db, test_db2, test_db3, test_db4)
 - PostgreSQL requirement for tests (not SQLite)
@@ -505,6 +538,7 @@ Logging is configured via YAML files (`logging-config_dev.yaml`, `logging-config
   - Added pytest-random-order for detecting order-dependent tests
 
 ### Service Layer Decoupling
+
 - Implemented service registry pattern for dependency injection
 - Services no longer directly import or instantiate other services
 - Centralized service registration in `src/core/service_initialization.py`
