@@ -29,53 +29,53 @@ jobs:
           --health-retries 5
 
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
+      - name: Checkout code
+        uses: actions/checkout@v4
 
-    - name: Set up Python
-      uses: actions/setup-python@v5
-      with:
-        python-version: '3.12'
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
 
-    - name: Install dependencies
-      run: |
-        python -m pip install --upgrade pip
-        pip install --disable-pip-version-check --retries 10 --timeout 120 "poetry==2.3.2"
-        poetry install
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install --disable-pip-version-check --retries 10 --timeout 120 "poetry==2.3.2"
+          poetry install
 
-    - name: Create .env file
-      run: |
-        echo "LOGS_CONFIG=logging-config_dev.yaml" >> .env
-        echo "DB_HOST=localhost" >> .env
-        echo "DB_USER=test" >> .env
-        echo "DB_PASSWORD=test" >> .env
-        echo "DB_NAME=test_db" >> .env
-        echo "DB_PORT=5432" >> .env
-        echo "DB_TEST_HOST=localhost" >> .env
-        echo "DB_TEST_USER=test" >> .env
-        echo "DB_TEST_PASSWORD=test" >> .env
-        echo "DB_TEST_NAME=test_db" >> .env
-        echo "DB_TEST_PORT=5432" >> .env
+      - name: Create .env file
+        run: |
+          echo "LOGS_CONFIG=logging-config_dev.yaml" >> .env
+          echo "DB_HOST=localhost" >> .env
+          echo "DB_USER=test" >> .env
+          echo "DB_PASSWORD=test" >> .env
+          echo "DB_NAME=test_db" >> .env
+          echo "DB_PORT=5432" >> .env
+          echo "DB_TEST_HOST=localhost" >> .env
+          echo "DB_TEST_USER=test" >> .env
+          echo "DB_TEST_PASSWORD=test" >> .env
+          echo "DB_TEST_NAME=test_db" >> .env
+          echo "DB_TEST_PORT=5432" >> .env
 
-    - name: Create .env.test file
-      run: |
-        echo "LOGS_CONFIG=logging-config_dev.yaml" >> .env.test
-        echo "DB_HOST=localhost" >> .env.test
-        echo "DB_USER=test" >> .env.test
-        echo "DB_PASSWORD=test" >> .env.test
-        echo "DB_NAME=test_db" >> .env.test
-        echo "DB_PORT=5432" >> .env.test
-        echo "DB_TEST_HOST=localhost" >> .env.test
-        echo "DB_TEST_USER=test" >> .env.test
-        echo "DB_TEST_PASSWORD=test" >> .env.test
-        echo "DB_TEST_NAME=test_db" >> .env.test
-        echo "DB_TEST_PORT=5432" >> .env.test
+      - name: Create .env.test file
+        run: |
+          echo "LOGS_CONFIG=logging-config_dev.yaml" >> .env.test
+          echo "DB_HOST=localhost" >> .env.test
+          echo "DB_USER=test" >> .env.test
+          echo "DB_PASSWORD=test" >> .env.test
+          echo "DB_NAME=test_db" >> .env.test
+          echo "DB_PORT=5432" >> .env.test
+          echo "DB_TEST_HOST=localhost" >> .env.test
+          echo "DB_TEST_USER=test" >> .env.test
+          echo "DB_TEST_PASSWORD=test" >> .env.test
+          echo "DB_TEST_NAME=test_db" >> .env.test
+          echo "DB_TEST_PORT=5432" >> .env.test
 
-    - name: Run tests
-      run: poetry run pytest -n 0
+      - name: Run tests
+        run: poetry run pytest -n 0
 
-    - name: Lint with Ruff
-      run: poetry run ruff check src/ tests/
+      - name: Lint with Ruff
+        run: poetry run ruff check src/ tests/
 
   build-and-push:
     needs: test
@@ -84,48 +84,48 @@ jobs:
       image_tag: ${{ steps.get_tag.outputs.tag }}
 
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-      with:
-        fetch-depth: 0
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-    - name: Get Git Tag
-      id: get_tag
-      run: |
-        TAG=$(git describe --tags --always)
-        echo "tag=$TAG" >> $GITHUB_OUTPUT
-        echo "Git tag: $TAG"
+      - name: Get Git Tag
+        id: get_tag
+        run: |
+          TAG=$(git describe --tags --always)
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
+          echo "Git tag: $TAG"
 
-    - name: Set up Docker Buildx
-      uses: docker/setup-buildx-action@v3
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
 
-    - name: Login to Docker Hub
-      uses: docker/login-action@v3
-      with:
-        username: ${{ secrets.DOCKERHUB_USERNAME }}
-        password: ${{ secrets.DOCKERHUB_TOKEN }}
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-    - name: Build and push Docker image (production)
-      uses: docker/build-push-action@v6
-      with:
-        context: .
-        file: Dockerfile
-        push: true
-        tags: |
-          ${{ secrets.DOCKERHUB_USERNAME }}/statsboards-backend:latest
-          ${{ secrets.DOCKERHUB_USERNAME }}/statsboards-backend:${{ steps.get_tag.outputs.tag }}
-          ${{ secrets.DOCKERHUB_USERNAME }}/statsboards-backend:prod
-        cache-from: type=registry,ref=${{ secrets.DOCKERHUB_USERNAME }}/statsboards-backend:buildcache
-        cache-to: type=registry,ref=${{ secrets.DOCKERHUB_USERNAME }}/statsboards-backend:buildcache,mode=max
+      - name: Build and push Docker image (production)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile
+          push: true
+          tags: |
+            ${{ secrets.DOCKERHUB_USERNAME }}/statsboards-backend:latest
+            ${{ secrets.DOCKERHUB_USERNAME }}/statsboards-backend:${{ steps.get_tag.outputs.tag }}
+            ${{ secrets.DOCKERHUB_USERNAME }}/statsboards-backend:prod
+          cache-from: type=registry,ref=${{ secrets.DOCKERHUB_USERNAME }}/statsboards-backend:buildcache
+          cache-to: type=registry,ref=${{ secrets.DOCKERHUB_USERNAME }}/statsboards-backend:buildcache,mode=max
 
-    - name: Build and push Docker image (development)
-      uses: docker/build-push-action@v6
-      with:
-        context: .
-        file: Dockerfile
-        push: true
-        tags: ${{ secrets.DOCKERHUB_USERNAME }}/statsboards-backend:dev
-        cache-from: type=registry,ref=${{ secrets.DOCKERHUB_USERNAME }}/statsboards-backend:buildcache
+      - name: Build and push Docker image (development)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile
+          push: true
+          tags: ${{ secrets.DOCKERHUB_USERNAME }}/statsboards-backend:dev
+          cache-from: type=registry,ref=${{ secrets.DOCKERHUB_USERNAME }}/statsboards-backend:buildcache
 
   deploy-k8s-dev:
     needs: build-and-push
@@ -134,62 +134,62 @@ jobs:
       image_tag: ${{ needs.build-and-push.outputs.image_tag }}
 
     steps:
-    - name: Install kubectl
-      run: |
-        curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
-        chmod +x kubectl
-        sudo mv kubectl /usr/local/bin/
-        kubectl version --client
+      - name: Install kubectl
+        run: |
+          curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+          chmod +x kubectl
+          sudo mv kubectl /usr/local/bin/
+          kubectl version --client
 
-    - name: Rollout Backend Deployment (dev)
-      run: |
-        echo "Restarting statsboards-backend deployment in stats-dev namespace..."
-        kubectl rollout restart deployment/statsboards-backend -n stats-dev
-        kubectl rollout status deployment/statsboards-backend -n stats-dev --timeout=180s
-        echo "Backend rollout complete!"
+      - name: Rollout Backend Deployment (dev)
+        run: |
+          echo "Restarting statsboards-backend deployment in stats-dev namespace..."
+          kubectl rollout restart deployment/statsboards-backend -n stats-dev
+          kubectl rollout status deployment/statsboards-backend -n stats-dev --timeout=180s
+          echo "Backend rollout complete!"
 
-  deploy-production:
-    needs: deploy-k8s-dev
-    runs-on: arc-runner-set
-    env:
-      BACKEND_IMAGE_TAG: ${{ needs.deploy-k8s-dev.outputs.image_tag }}
-
-    steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-
-    - name: Setup SSH Key and Config
-      run: |
-        mkdir -p ~/.ssh
-        echo "${{ secrets.STATSBOARDS_DEPLOY_KEY }}" > ~/.ssh/id_rsa
-        chmod 600 ~/.ssh/id_rsa
-        ssh-keyscan -H ${{ secrets.SSH_HOST }} >> ~/.ssh/known_hosts
-
-    - name: Validate SSH Configuration
-      run: |
-        echo "Host: ${{ secrets.SSH_HOST }}"
-        echo "User: ${{ secrets.SSH_USER }}"
-        echo "Work Dir: ${{ secrets.WORK_DIR }}"
-        echo "Image Tag: $BACKEND_IMAGE_TAG"
-        if [[ -z "${{ secrets.SSH_USER }}" || -z "${{ secrets.SSH_HOST }}" || -z "${{ secrets.WORK_DIR }}" ]]; then
-          echo "Error: One or more required secrets are missing or empty!" >&2
-          exit 1
-        fi
-        ls -la ~/.ssh
-
-    - name: Pull and Deploy on Server
-      run: |
-        set -e
-        ssh ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }} "\
-          cd ${{ secrets.WORK_DIR }} && \
-          git pull || (echo 'Git pull failed' && exit 1) && \
-          export BACKEND_IMAGE_TAG=$BACKEND_IMAGE_TAG && \
-          docker-compose -f docker-compose.prod.yml pull statsboards-backend || (echo 'Docker pull failed' && exit 1) && \
-          docker-compose -f docker-compose.prod.yml run --rm statsboards-backend alembic upgrade head || (echo 'Alembic migration failed' && exit 1) && \
-          docker-compose -f docker-compose.prod.yml up -d || (echo 'Docker deployment failed' && exit 1)"
-
-    - name: Cleanup SSH Keys Locally
-      if: always()
-      run: |
-        echo "Cleaning up SSH keys on the runner..."
-        rm -rf ~/.ssh
+  # deploy-production:
+  #   needs: deploy-k8s-dev
+  #   runs-on: arc-runner-set
+  #   env:
+  #     BACKEND_IMAGE_TAG: ${{ needs.deploy-k8s-dev.outputs.image_tag }}
+  #
+  #   steps:
+  #   - name: Checkout code
+  #     uses: actions/checkout@v4
+  #
+  #   - name: Setup SSH Key and Config
+  #     run: |
+  #       mkdir -p ~/.ssh
+  #       echo "${{ secrets.STATSBOARDS_DEPLOY_KEY }}" > ~/.ssh/id_rsa
+  #       chmod 600 ~/.ssh/id_rsa
+  #       ssh-keyscan -H ${{ secrets.SSH_HOST }} >> ~/.ssh/known_hosts
+  #
+  #   - name: Validate SSH Configuration
+  #     run: |
+  #       echo "Host: ${{ secrets.SSH_HOST }}"
+  #       echo "User: ${{ secrets.SSH_USER }}"
+  #       echo "Work Dir: ${{ secrets.WORK_DIR }}"
+  #       echo "Image Tag: $BACKEND_IMAGE_TAG"
+  #       if [[ -z "${{ secrets.SSH_USER }}" || -z "${{ secrets.SSH_HOST }}" || -z "${{ secrets.WORK_DIR }}" ]]; then
+  #         echo "Error: One or more required secrets are missing or empty!" >&2
+  #         exit 1
+  #       fi
+  #       ls -la ~/.ssh
+  #
+  #   - name: Pull and Deploy on Server
+  #     run: |
+  #       set -e
+  #       ssh ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }} "\
+  #         cd ${{ secrets.WORK_DIR }} && \
+  #         git pull || (echo 'Git pull failed' && exit 1) && \
+  #         export BACKEND_IMAGE_TAG=$BACKEND_IMAGE_TAG && \
+  #         docker-compose -f docker-compose.prod.yml pull statsboards-backend || (echo 'Docker pull failed' && exit 1) && \
+  #         docker-compose -f docker-compose.prod.yml run --rm statsboards-backend alembic upgrade head || (echo 'Alembic migration failed' && exit 1) && \
+  #         docker-compose -f docker-compose.prod.yml up -d || (echo 'Docker deployment failed' && exit 1)"
+  #
+  #   - name: Cleanup SSH Keys Locally
+  #     if: always()
+  #     run: |
+  #       echo "Cleaning up SSH keys on the runner..."
+  #       rm -rf ~/.ssh
