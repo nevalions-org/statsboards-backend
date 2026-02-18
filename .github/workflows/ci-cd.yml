@@ -105,19 +105,27 @@ jobs:
         username: ${{ secrets.DOCKERHUB_USERNAME }}
         password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-    - name: Build and push Docker image
+    - name: Build and push Docker image (production)
       uses: docker/build-push-action@v6
       with:
         context: .
+        file: Dockerfile
         push: true
         tags: |
           ${{ secrets.DOCKERHUB_USERNAME }}/statsboards-backend:latest
           ${{ secrets.DOCKERHUB_USERNAME }}/statsboards-backend:${{ steps.get_tag.outputs.tag }}
-          ${{ secrets.DOCKERHUB_USERNAME }}/statsboards-backend:${{ github.sha }}
-          ${{ secrets.DOCKERHUB_USERNAME }}/statsboards-backend:dev
           ${{ secrets.DOCKERHUB_USERNAME }}/statsboards-backend:prod
         cache-from: type=registry,ref=${{ secrets.DOCKERHUB_USERNAME }}/statsboards-backend:buildcache
         cache-to: type=registry,ref=${{ secrets.DOCKERHUB_USERNAME }}/statsboards-backend:buildcache,mode=max
+
+    - name: Build and push Docker image (development)
+      uses: docker/build-push-action@v6
+      with:
+        context: .
+        file: Dockerfile
+        push: true
+        tags: ${{ secrets.DOCKERHUB_USERNAME }}/statsboards-backend:dev
+        cache-from: type=registry,ref=${{ secrets.DOCKERHUB_USERNAME }}/statsboards-backend:buildcache
 
   deploy-k8s-dev:
     needs: build-and-push
