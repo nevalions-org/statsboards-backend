@@ -1,3 +1,5 @@
+from typing import cast
+
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
@@ -26,6 +28,12 @@ from .schemas import (
 ITEM = "TEAM"
 
 
+def _invalidate_team_cache(team_id: int | None = None) -> None:
+    from src.matches.match_data_cache_service import MatchDataCacheService
+
+    MatchDataCacheService.invalidate_team_cache_all(team_id)
+
+
 class TeamServiceDB(BaseServiceDB):
     def __init__(
         self,
@@ -40,7 +48,9 @@ class TeamServiceDB(BaseServiceDB):
         self,
         item: TeamSchemaCreate | TeamSchemaUpdate,
     ) -> TeamDB:
-        return await super().create(item)
+        created = cast(TeamDB, await super().create(item))
+        _invalidate_team_cache(created.id)
+        return created
 
     async def create_or_update_team(
         self,
@@ -173,11 +183,21 @@ class TeamServiceDB(BaseServiceDB):
         **kwargs,
     ) -> TeamDB:
         self.logger.debug(f"Update {ITEM}:{item_id}")
-        return await super().update(
-            item_id,
-            item,
-            **kwargs,
+        updated = cast(
+            TeamDB,
+            await super().update(
+                item_id,
+                item,
+                **kwargs,
+            ),
         )
+        _invalidate_team_cache(item_id)
+        return updated
+
+    async def delete(self, item_id: int) -> dict[str, int]:
+        deleted = cast(dict[str, int], await super().delete(item_id))
+        _invalidate_team_cache(item_id)
+        return deleted
 
     @handle_service_exceptions(
         item_name=ITEM,

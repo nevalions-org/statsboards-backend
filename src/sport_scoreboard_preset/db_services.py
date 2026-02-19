@@ -25,6 +25,12 @@ from .schemas import SportScoreboardPresetSchemaCreate
 ITEM = "SPORT_SCOREBOARD_PRESET"
 
 
+def _invalidate_preset_cache(preset_id: int | None = None) -> None:
+    from src.matches.match_data_cache_service import MatchDataCacheService
+
+    MatchDataCacheService.invalidate_sport_scoreboard_preset_cache_all(preset_id)
+
+
 class SportScoreboardPresetServiceDB(ServiceRegistryAccessorMixin, BaseServiceDB):
     def __init__(self, database: Database) -> None:
         super().__init__(
@@ -37,7 +43,9 @@ class SportScoreboardPresetServiceDB(ServiceRegistryAccessorMixin, BaseServiceDB
     @handle_service_exceptions(item_name=ITEM, operation="creating")
     async def create(self, item: SportScoreboardPresetSchemaCreate) -> SportScoreboardPresetDB:
         self.logger.debug(f"Create {ITEM}:{item}")
-        return await super().create(item)
+        created = cast(SportScoreboardPresetDB, await super().create(item))
+        _invalidate_preset_cache(created.id)
+        return created
 
     @handle_service_exceptions(item_name=ITEM, operation="updating", reraise_not_found=True)
     async def update(
@@ -58,8 +66,14 @@ class SportScoreboardPresetServiceDB(ServiceRegistryAccessorMixin, BaseServiceDB
         )
 
         await self._propagate_preset_to_matches(updated_preset)
+        _invalidate_preset_cache(item_id)
 
         return updated_preset
+
+    async def delete(self, item_id: int) -> dict[str, int]:
+        deleted = cast(dict[str, int], await super().delete(item_id))
+        _invalidate_preset_cache(item_id)
+        return deleted
 
     async def _propagate_preset_to_matches(
         self,

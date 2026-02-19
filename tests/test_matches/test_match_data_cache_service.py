@@ -1,4 +1,5 @@
 import asyncio
+import time
 from unittest.mock import patch
 
 import pytest
@@ -213,5 +214,33 @@ class TestMatchDataCacheService:
             assert result is None
             assert "match-update:1" not in cache_service._cache
 
-            assert result is None
-            assert "match-update:1" not in cache_service._cache
+    async def test_get_or_fetch_team_uses_reference_cache(self, cache_service):
+        call_count = {"count": 0}
+
+        async def fetch_team():
+            call_count["count"] += 1
+            return {"id": 10, "title": "Team A"}
+
+        first = await cache_service.get_or_fetch_team(10, fetch_team)
+        second = await cache_service.get_or_fetch_team(10, fetch_team)
+
+        assert first == {"id": 10, "title": "Team A"}
+        assert second == {"id": 10, "title": "Team A"}
+        assert call_count["count"] == 1
+
+    async def test_invalidate_tournament_cache_all_clears_reference_cache(self, cache_service):
+        async def fetch_tournament():
+            return {"id": 50, "title": "Cup"}
+
+        await cache_service.get_or_fetch_tournament(50, fetch_tournament)
+        assert cache_service._get_reference_cache_item("tournament", 50) is not None
+
+        MatchDataCacheService.invalidate_tournament_cache_all(50)
+
+        assert cache_service._get_reference_cache_item("tournament", 50) is None
+
+    async def test_reference_cache_ttl_expiration(self, cache_service):
+        cache_service._set_reference_cache_item("sport", 77, ttl_seconds=1, payload={"id": 77})
+
+        with patch("time.monotonic", return_value=time.monotonic() + 2):
+            assert cache_service._get_reference_cache_item("sport", 77) is None

@@ -1,3 +1,5 @@
+from typing import cast
+
 from sqlalchemy import select
 
 from src.core.decorators import handle_service_exceptions
@@ -18,6 +20,12 @@ from .schemas import SportSchemaCreate, SportSchemaUpdate
 ITEM = "SPORT"
 
 
+def _invalidate_sport_cache(sport_id: int | None = None) -> None:
+    from src.matches.match_data_cache_service import MatchDataCacheService
+
+    MatchDataCacheService.invalidate_sport_cache_all(sport_id)
+
+
 class SportServiceDB(ServiceRegistryAccessorMixin, BaseServiceDB):
     def __init__(self, database: Database) -> None:
         super().__init__(
@@ -30,7 +38,9 @@ class SportServiceDB(ServiceRegistryAccessorMixin, BaseServiceDB):
     @handle_service_exceptions(item_name=ITEM, operation="creating")
     async def create(self, item: SportSchemaCreate) -> SportDB:
         self.logger.debug(f"Creat {ITEM}:{item}")
-        return await super().create(item)
+        created = cast(SportDB, await super().create(item))
+        _invalidate_sport_cache(created.id)
+        return created
 
     @handle_service_exceptions(item_name=ITEM, operation="updating", reraise_not_found=True)
     async def update(
@@ -40,11 +50,21 @@ class SportServiceDB(ServiceRegistryAccessorMixin, BaseServiceDB):
         **kwargs,
     ) -> SportDB:
         self.logger.debug(f"Update {ITEM} with id:{item_id}")
-        return await super().update(
-            item_id,
-            item,
-            **kwargs,
+        updated = cast(
+            SportDB,
+            await super().update(
+                item_id,
+                item,
+                **kwargs,
+            ),
         )
+        _invalidate_sport_cache(item_id)
+        return updated
+
+    async def delete(self, item_id: int) -> dict[str, int]:
+        deleted = cast(dict[str, int], await super().delete(item_id))
+        _invalidate_sport_cache(item_id)
+        return deleted
 
     async def get_tournaments_by_sport(
         self,

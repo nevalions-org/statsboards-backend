@@ -1,3 +1,5 @@
+from typing import cast
+
 from fastapi import HTTPException
 from sqlalchemy import not_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -40,6 +42,18 @@ from .schemas import (
 ITEM = "TOURNAMENT"
 
 
+def _invalidate_tournament_cache(tournament_id: int | None = None) -> None:
+    from src.matches.match_data_cache_service import MatchDataCacheService
+
+    MatchDataCacheService.invalidate_tournament_cache_all(tournament_id)
+
+
+def _invalidate_team_cache(team_id: int | None = None) -> None:
+    from src.matches.match_data_cache_service import MatchDataCacheService
+
+    MatchDataCacheService.invalidate_team_cache_all(team_id)
+
+
 class TournamentServiceDB(BaseServiceDB):
     def __init__(self, database: Database) -> None:
         super().__init__(
@@ -55,7 +69,9 @@ class TournamentServiceDB(BaseServiceDB):
         item: TournamentSchemaCreate | TournamentSchemaUpdate,
     ) -> TournamentDB:
         self.logger.debug(f"Create new {ITEM}:{item}")
-        return await super().create(item)
+        created = cast(TournamentDB, await super().create(item))
+        _invalidate_tournament_cache(created.id)
+        return created
 
     async def create_or_update_tournament(
         self,
@@ -124,11 +140,21 @@ class TournamentServiceDB(BaseServiceDB):
         **kwargs,
     ) -> TournamentDB:
         self.logger.debug(f"Update {ITEM}:{item_id}")
-        return await super().update(
-            item_id,
-            item,
-            **kwargs,
+        updated = cast(
+            TournamentDB,
+            await super().update(
+                item_id,
+                item,
+                **kwargs,
+            ),
         )
+        _invalidate_tournament_cache(item_id)
+        return updated
+
+    async def delete(self, item_id: int) -> dict[str, int]:
+        deleted = cast(dict[str, int], await super().delete(item_id))
+        _invalidate_tournament_cache(item_id)
+        return deleted
 
     async def get_teams_by_tournament(
         self,
@@ -723,6 +749,9 @@ class TournamentServiceDB(BaseServiceDB):
                             f"All tournaments moved: {sorted(conflicting_tournament_ids) + [tournament_id]} -> sport {target_sport_id}"
                         )
 
+                        _invalidate_tournament_cache()
+                        _invalidate_team_cache()
+
                         return MoveTournamentToSportResponse(
                             moved=True,
                             preview=False,
@@ -920,6 +949,8 @@ class TournamentServiceDB(BaseServiceDB):
                     f"player_team_tournaments={player_team_tournaments_updated}, "
                     f"player_matches={player_matches_updated}"
                 )
+                _invalidate_tournament_cache()
+                _invalidate_team_cache()
                 return MoveTournamentToSportResponse(
                     moved=True,
                     preview=False,

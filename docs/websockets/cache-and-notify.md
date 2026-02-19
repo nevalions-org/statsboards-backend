@@ -26,3 +26,19 @@ Before sending messages, caches are invalidated to force fresh reads:
 - `event-update` → `invalidate_event_data(match_id)`
 - `statistics-update` → `invalidate_stats(match_id)`
 - `players-update` → `invalidate_players(match_id)`
+
+## Reference Data Cache (TTL)
+
+`MatchDataCacheService` also keeps a small in-memory TTL cache for slowly changing reference entities used by websocket fetch paths:
+
+- `team` entries: 5 minutes
+- `tournament` entries: 5 minutes
+- `sport` entries: 30 minutes
+- `sport_scoreboard_preset` entries: 30 minutes
+
+These caches are invalidated on writes (create/update/delete) in the corresponding services:
+
+- `TeamServiceDB`
+- `TournamentServiceDB` (including tournament move operations)
+- `SportServiceDB`
+- `SportScoreboardPresetServiceDB`

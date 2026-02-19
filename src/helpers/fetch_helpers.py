@@ -19,8 +19,10 @@ from src.core.models import (
     MatchDataDB,
     SponsorDB,
     SponsorSponsorLineDB,
+    SportDB,
     SportScoreboardPresetDB,
     TeamDB,
+    TournamentDB,
 )
 from src.core.models.base import Database
 from src.core.period_clock import calculate_effective_gameclock_max, extract_period_index
@@ -406,13 +408,22 @@ async def fetch_match_data(match_id: int, database=None) -> dict[str, Any] | Non
         match_data_service_db = MatchDataServiceDB(_db)
         match_service_db = MatchServiceDB(_db)
 
-        match, match_teams_data, match_data = await asyncio.gather(
+        match, match_data = await asyncio.gather(
             match_service_db.get_by_id(match_id),
-            match_service_db.get_teams_by_match(match_id),
             match_service_db.get_matchdata_by_match(match_id),
         )
 
         if match:
+            team_a, team_b = await asyncio.gather(
+                _get_team_by_id_cached(match.team_a_id, database=_db),
+                _get_team_by_id_cached(match.team_b_id, database=_db),
+            )
+
+            match_teams_data = {
+                "team_a": team_a.__dict__ if team_a else None,
+                "team_b": team_b.__dict__ if team_b else None,
+            }
+
             if match_data is None:
                 match_data_schema = MatchDataSchemaCreate(match_id=match_id)
                 match_data = await match_data_service_db.create(match_data_schema)
@@ -431,6 +442,74 @@ async def fetch_match_data(match_id: int, database=None) -> dict[str, Any] | Non
             }
     except Exception as e:
         fetch_data_logger.error(f"Error while fetching matchdata: {e}", exc_info=True)
+
+
+async def _get_team_by_id_cached(
+    team_id: int,
+    *,
+    database: Database,
+    cache_service=None,
+) -> TeamDB | None:
+    from src.teams.db_services import TeamServiceDB
+
+    team_service = TeamServiceDB(database)
+    if cache_service is None:
+        return await team_service.get_by_id(team_id)
+
+    return await cache_service.get_or_fetch_team(team_id, lambda: team_service.get_by_id(team_id))
+
+
+async def _get_tournament_by_id_cached(
+    tournament_id: int,
+    *,
+    database: Database,
+    cache_service=None,
+) -> TournamentDB | None:
+    from src.tournaments.db_services import TournamentServiceDB
+
+    tournament_service = TournamentServiceDB(database)
+    if cache_service is None:
+        return await tournament_service.get_by_id(tournament_id)
+
+    return await cache_service.get_or_fetch_tournament(
+        tournament_id,
+        lambda: tournament_service.get_by_id(tournament_id),
+    )
+
+
+async def _get_sport_by_id_cached(
+    sport_id: int,
+    *,
+    database: Database,
+    cache_service=None,
+) -> SportDB | None:
+    from src.sports.db_services import SportServiceDB
+
+    sport_service = SportServiceDB(database)
+    if cache_service is None:
+        return await sport_service.get_by_id(sport_id)
+
+    return await cache_service.get_or_fetch_sport(
+        sport_id, lambda: sport_service.get_by_id(sport_id)
+    )
+
+
+async def _get_preset_by_id_cached(
+    preset_id: int,
+    *,
+    database: Database,
+    cache_service=None,
+) -> SportScoreboardPresetDB | None:
+    from src.sport_scoreboard_preset.db_services import SportScoreboardPresetServiceDB
+
+    preset_service = SportScoreboardPresetServiceDB(database)
+    if cache_service is None:
+        return await preset_service.get_by_id(preset_id)
+
+    return await cache_service.get_or_fetch_sport_scoreboard_preset(
+        preset_id,
+        lambda: preset_service.get_by_id(preset_id),
+    )
 
 
 async def fetch_with_scoreboard_data(
@@ -646,29 +725,50 @@ async def fetch_gameclock(
     match_service_db = MatchServiceDB(_db)
 
     try:
-        match, gameclock, sport, match_data = await asyncio.gather(
+        match, gameclock, match_data = await asyncio.gather(
             match_service_db.get_by_id(match_id),
             gameclock_service.get_gameclock_by_match_id(match_id),
-            match_service_db.get_sport_by_match_id(match_id),
             MatchDataServiceDB(_db).get_match_data_by_match_id(match_id),
         )
 
         if match:
+            tournament = await _get_tournament_by_id_cached(
+                match.tournament_id,
+                database=_db,
+                cache_service=cache_service,
+            )
+            sport = (
+                await _get_sport_by_id_cached(
+                    tournament.sport_id,
+                    database=_db,
+                    cache_service=cache_service,
+                )
+                if tournament is not None
+                else None
+            )
+            preset = (
+                await _get_preset_by_id_cached(
+                    sport.scoreboard_preset_id,
+                    database=_db,
+                    cache_service=cache_service,
+                )
+                if sport is not None and sport.scoreboard_preset_id is not None
+                else None
+            )
+
             if gameclock is None:
                 gameclock_schema = GameClockSchemaCreate(match_id=match_id)
 
-                if sport and sport.scoreboard_preset:
+                if preset is not None:
                     period_index = extract_period_index(
                         period_key=match_data.period_key if match_data is not None else None,
                         qtr=match_data.qtr if match_data is not None else None,
                     )
                     preset_values = _get_preset_values_for_gameclock(
-                        sport.scoreboard_preset,
+                        preset,
                         period_index=period_index,
                     )
-                    fetch_data_logger.debug(
-                        f"Using sport preset {sport.scoreboard_preset.id} for gameclock"
-                    )
+                    fetch_data_logger.debug(f"Using sport preset {preset.id} for gameclock")
                     for key, value in preset_values.items():
                         setattr(gameclock_schema, key, value)
                 else:
@@ -710,14 +810,35 @@ async def fetch_playclock(
     playclock_service = PlayClockServiceDB(_db)
     match_service_db = MatchServiceDB(_db)
     try:
-        match, playclock, sport = await asyncio.gather(
+        match, playclock = await asyncio.gather(
             match_service_db.get_by_id(match_id),
             playclock_service.get_playclock_by_match_id(match_id),
-            match_service_db.get_sport_by_match_id(match_id),
         )
 
         if match:
-            preset = sport.scoreboard_preset if sport else None
+            tournament = await _get_tournament_by_id_cached(
+                match.tournament_id,
+                database=_db,
+                cache_service=cache_service,
+            )
+            sport = (
+                await _get_sport_by_id_cached(
+                    tournament.sport_id,
+                    database=_db,
+                    cache_service=cache_service,
+                )
+                if tournament is not None
+                else None
+            )
+            preset = (
+                await _get_preset_by_id_cached(
+                    sport.scoreboard_preset_id,
+                    database=_db,
+                    cache_service=cache_service,
+                )
+                if sport is not None and sport.scoreboard_preset_id is not None
+                else None
+            )
             supports_playclock = True
             if preset is not None:
                 supports_playclock = _preset_supports_playclock(preset)
